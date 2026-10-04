@@ -28,10 +28,15 @@ def signed_download(url, filename, digest, publisher):
         target.write_bytes(data)
     payload = base64.b64encode(json.dumps({'path': str(target), 'publisher': publisher}).encode()).decode()
     script = "$ErrorActionPreference='Stop'; $data=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + payload + "')) | ConvertFrom-Json; "
-    script += "$sig=Get-AuthenticodeSignature -LiteralPath $data.path; if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) -ne $data.publisher) { throw 'Invalid dependency signature or publisher' }"
+    script += "$sig=Get-AuthenticodeSignature -LiteralPath $data.path; $publisher=''; if ($sig.SignerCertificate) { $publisher=$sig.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) }; "
+    script += "if ($sig.Status -ne 'Valid' -or $publisher -ne $data.publisher) { throw ('Dependency signature: ' + $sig.Status + '; publisher: ' + $publisher + '; ' + $sig.StatusMessage) }"
     encoded = base64.b64encode(script.encode('utf-16-le')).decode()
-    subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-                   check=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
+    result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand', encoded],
+                            capture_output=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode:
+        details = (result.stdout + result.stderr).decode('utf-8', errors='replace').strip()
+        raise RuntimeError('Dependency signature verification failed for ' + filename + ': ' +
+                           (details or 'PowerShell exited with code ' + str(result.returncode)))
     return target
 
 
