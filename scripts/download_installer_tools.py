@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import urllib.request
@@ -27,12 +28,17 @@ def signed_download(url, filename, digest, publisher):
             raise RuntimeError('Installer dependency SHA256 mismatch: ' + filename)
         target.write_bytes(data)
     payload = base64.b64encode(json.dumps({'path': str(target), 'publisher': publisher}).encode()).decode()
-    script = "$ErrorActionPreference='Stop'; $data=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + payload + "')) | ConvertFrom-Json; "
+    # A pwsh parent can export PowerShell 7's modules to Windows PowerShell 5.1.
+    # Let Windows PowerShell reconstruct its own module paths at startup.
+    environment = {key: value for key, value in os.environ.items() if key.upper() != 'PSMODULEPATH'}
+    script = "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; "
+    script += "$data=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + payload + "')) | ConvertFrom-Json; "
     script += "$sig=Get-AuthenticodeSignature -LiteralPath $data.path; $publisher=''; if ($sig.SignerCertificate) { $publisher=$sig.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) }; "
     script += "if ($sig.Status -ne 'Valid' -or $publisher -ne $data.publisher) { throw ('Dependency signature: ' + $sig.Status + '; publisher: ' + $publisher + '; ' + $sig.StatusMessage) }"
     encoded = base64.b64encode(script.encode('utf-16-le')).decode()
     result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand', encoded],
-                            capture_output=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
+                            capture_output=True, timeout=45, env=environment,
+                            creationflags=subprocess.CREATE_NO_WINDOW)
     if result.returncode:
         details = (result.stdout + result.stderr).decode('utf-8', errors='replace').strip()
         raise RuntimeError('Dependency signature verification failed for ' + filename + ': ' +
