@@ -6,7 +6,7 @@
 
 ## Забрать
 
-[Сборки в Actions](https://github.com/MaimeD666/Yukiwire-client/actions/workflows/check.yml) → успешный запуск → **Artifacts**. Внутри установщик и portable ZIP.
+[Скачать](https://github.com/MaimeD666/Yukiwire-client/releases) — установщик или portable ZIP. Я всё упаковала.
 
 Установи или распакуй, добавь свою ссылку подключения, нажми «Подключиться». Сервер нужен свой, из воздуха я его не достану.
 

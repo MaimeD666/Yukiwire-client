@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/release.yml]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: release-v0.4-preview
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN_ID: '37209255824'
+      RELEASE_COMMIT: 5b859940f9124dff2b6e1fb2985a283edd5a33c8
+      RELEASE_TAG: v0.4-preview
+      ARTIFACT_NAME: Yukiwire-0.4-preview-win-x64
+    steps:
+      - name: Check the tested source revision
+        run: |
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN_ID" > build-run.json
+          python3 - <<'PY'
+          import json, os
+          run = json.load(open('build-run.json'))
+          expected = {
+              'status': 'completed', 'conclusion': 'success',
+              'head_sha': os.environ['RELEASE_COMMIT'], 'head_branch': 'main',
+              'event': 'push', 'path': '.github/workflows/check.yml',
+          }
+          for key, value in expected.items():
+              if run.get(key) != value:
+                  raise SystemExit(f'Unexpected build {key}: {run.get(key)!r}')
+          if run['repository']['full_name'] != os.environ['GH_REPO']:
+              raise SystemExit('Build belongs to another repository')
+          PY
+
+      - name: Download and verify the tested packages
+        run: |
+          gh run download "$BUILD_RUN_ID" --name "$ARTIFACT_NAME" --dir release-assets
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, zipfile
+          folder = pathlib.Path('release-assets')
+          stem = os.environ['ARTIFACT_NAME']
+          packages = {stem + '.zip', stem + '-setup.exe'}
+          if {p.name for p in folder.iterdir()} != packages | {'SHA256SUMS.txt'}:
+              raise SystemExit('Unexpected release files')
+          checksums = {}
+          for line in (folder / 'SHA256SUMS.txt').read_text().splitlines():
+              match = re.fullmatch(r'([0-9a-f]{64})  (.+)', line)
+              if not match or match[2] not in packages or match[2] in checksums:
+                  raise SystemExit('Invalid checksum manifest')
+              checksums[match[2]] = match[1]
+          if set(checksums) != packages:
+              raise SystemExit('Incomplete checksum manifest')
+          for name, expected in checksums.items():
+              if hashlib.sha256((folder / name).read_bytes()).hexdigest() != expected:
+                  raise SystemExit(f'Checksum mismatch: {name}')
+          with zipfile.ZipFile(folder / (stem + '.zip')) as archive:
+              metadata = json.loads(archive.read('Yukiwire/portable.json'))
+              if metadata.get('version') != '0.4' or not metadata.get('tun_available'):
+                  raise SystemExit('Wrong portable package')
+          PY
+
+      - name: Upload a draft release
+        run: |
+          cat > release-notes.md <<'NOTES'
+          Yukiwire для **Windows 10/11 x64**.
+
+          - **setup.exe** — обычная установка с ярлыками.
+          - **.zip** — portable: распакуй и запусти `Yukiwire.exe`.
+
+          Добавь свою ссылку подключения и нажми «Подключиться». Сервер в комплект не входит.
+
+          Первая предварительная версия. Проверены установка, обновление, удаление и работа прокси. Контрольные суммы файлов — в `SHA256SUMS.txt`.
+          NOTES
+          gh api --method POST "repos/$GH_REPO/git/refs" \
+            -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$RELEASE_COMMIT" > tag.json
+          gh release create "$RELEASE_TAG" \
+            "release-assets/$ARTIFACT_NAME-setup.exe" \
+            "release-assets/$ARTIFACT_NAME.zip" \
+            release-assets/SHA256SUMS.txt \
+            --draft --prerelease --verify-tag --target "$RELEASE_COMMIT" \
+            --title 'Yukiwire 0.4 preview' --notes-file release-notes.md
+
+      - name: Verify uploaded assets and publish
+        run: |
+          gh api "repos/$GH_REPO/releases" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\")" > release.json
+          gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" > tag.json
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          release = json.load(open('release.json'))
+          tag = json.load(open('tag.json'))
+          if not release['draft'] or not release['prerelease']:
+              raise SystemExit('Expected a draft prerelease')
+          if release['target_commitish'] != os.environ['RELEASE_COMMIT']:
+              raise SystemExit('Wrong release target')
+          if tag['object']['type'] != 'commit' or tag['object']['sha'] != os.environ['RELEASE_COMMIT']:
+              raise SystemExit('Wrong release tag')
+          files = {p.name: p for p in pathlib.Path('release-assets').iterdir()}
+          if {a['name'] for a in release['assets']} != set(files):
+              raise SystemExit('Incomplete release upload')
+          for asset in release['assets']:
+              path = files[asset['name']]
+              digest = 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
+              if asset['state'] != 'uploaded' or asset['size'] != path.stat().st_size or asset.get('digest') != digest:
+                  raise SystemExit(f'Upload verification failed: {path.name}')
+          PY
+          gh release edit "$RELEASE_TAG" --draft=false
