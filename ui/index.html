@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="dark light">
+  <title>Yukiwire</title>
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+<svg class="icon-library" aria-hidden="true"><defs>
+  <symbol id="i-crest" viewBox="0 0 32 40">
+    <path d="M16 2 28 12v17L16 38 4 29V12Z M16 7 23 14v12l-7 6-7-6V14Z M10 13l6 9 6-9 M16 22v10"/>
+  </symbol>
+  <symbol id="i-gate" viewBox="0 0 80 80">
+    <path d="M40 4C32 15 17 19 17 38v27h46V38C63 19 48 15 40 4Z M40 13C34 22 24 25 24 39v19h32V39c0-14-10-17-16-26Z"/>
+    <path d="M40 27v15 M32 35a12 12 0 1 0 16 0 M9 65h62 M9 70h62 M40 70v6 M8 28v19 M4 37h8 M72 28v19 M68 37h8"/>
+  </symbol>
+  <symbol id="i-rosette" viewBox="0 0 100 100">
+    <path d="M50 6 63 24 85 15 76 37 94 50 76 63 85 85 63 76 50 94 37 76 15 85 24 63 6 50 24 37 15 15 37 24Z M50 20 80 50 50 80 20 50Z M50 33 67 50 50 67 33 50Z M50 6v27 M94 50H67 M50 94V67 M6 50h27"/>
+  </symbol>
+
+ <symbol id="i-brand" viewBox="0 0 24 24"><path d="m6 5 6 8 6-8m-6 8v6"/></symbol>
+ <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9M7 5.7a8 8 0 1 0 10 0"/></symbol>
+ <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+ <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+ <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+ <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+ <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></symbol>
+ <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v8a4 4 0 0 0 4 4h6M6 11h8a4 4 0 0 0 4-4V3m-3 3 3-3 3 3"/></symbol>
+ <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></symbol>
+ <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v15m-6-6 6 6 6-6"/></symbol>
+ <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 20V5m-6 6 6-6 6 6"/></symbol>
+ <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M5.2 8A7.5 7.5 0 0 1 18 5.5L20 8M4 16l2 2.5A7.5 7.5 0 0 0 18.8 16"/></symbol>
+ <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/></symbol>
+ <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+ <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7M5 9v11h5v-6h4v6h5V9"/></symbol>
+ <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h4M12 17.5h4"/></symbol>
+ <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+ <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+ <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+ <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></symbol>
+ <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+ <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+ <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+ <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1 1m12 12 1 1M5 19l1-1M18 6l1-1"/></symbol>
+ <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14A8 8 0 0 1 10 4a8.5 8.5 0 1 0 10 10Z"/></symbol>
+ <symbol id="i-edit" viewBox="0 0 24 24"><path d="m15 4 5 5M4 20l5-1L20 8a3.5 3.5 0 0 0-5-5L4 14Z"/></symbol>
+ <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></symbol>
+</defs></svg>
+<a href="#workspace" class="skip-link">Перейти к содержимому</a>
+<header class="titlebar" id="titlebar"><span class="titlebar-name">Yukiwire</span><div class="window-controls"><button data-action="window_minimize" aria-label="Свернуть">−</button><button data-action="window_maximize" aria-label="Развернуть">□</button><button data-action="window_close" aria-label="Закрыть" class="window-close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div></header>
+<div class="app-shell">
+ <aside class="sidebar" aria-label="Навигация">
+  <a class="brand" href="#" aria-label="Yukiwire, главный экран"><span class="brand-mark"><svg aria-hidden="true"><use href="#i-crest"/></svg></span><span>yukiwire</span></a>
+  <nav class="main-nav" aria-label="Основные разделы">
+   <button class="nav-item selected" data-page="home" aria-current="page" title="Обзор · Alt+1"><svg aria-hidden="true"><use href="#i-home"/></svg><span>Обзор</span></button>
+   <button class="nav-item" data-panel="profiles" title="Профили · Alt+2"><svg aria-hidden="true"><use href="#i-server"/></svg><span>Профили</span><span class="nav-count" id="profile-count">0</span></button>
+   <button class="nav-item" data-panel="routing" title="Маршруты · Alt+3"><svg aria-hidden="true"><use href="#i-route"/></svg><span>Маршруты</span></button>
+   <button class="nav-item" data-panel="activity" title="Активность · Alt+4"><svg aria-hidden="true"><use href="#i-activity"/></svg><span>Активность</span></button>
+  </nav>
+  <div class="sidebar-bottom"><button class="nav-item" data-panel="settings" title="Настройки · Alt+5"><svg aria-hidden="true"><use href="#i-settings"/></svg><span>Настройки</span></button></div>
+ </aside>
+ <main id="workspace" tabindex="-1">
+  <header class="page-heading"><div><h1 id="page-title" tabindex="-1">Обзор</h1></div><div class="heading-actions"><button class="icon-button" id="theme-toggle" aria-label="Включить светлую тему" title="Сменить тему"><svg aria-hidden="true"><use href="#i-sun"/></svg></button><span class="header-status"><span class="service-dot" id="header-dot"></span><span id="header-status">Запуск</span></span></div></header>
+  <div id="home-view" class="home-view">
+   <div class="home-main">
+   <section class="connection-card" aria-labelledby="connection-title">
+    <div class="connection-info">
+     <div class="connection-summary"><h2 id="connection-title" role="status">Запуск…</h2><span class="environment-badge" id="environment-notice" hidden title="Другой VPN включён. Доступен локальный прокси.">Другой VPN</span></div>
+     <p class="connection-hint" id="connection-hint" hidden></p>
+     <div class="home-profile-field"><label for="home-profile">Профиль <span id="profile-protocol">Ссылка или JSON</span></label><div class="control-pair"><select id="home-profile" aria-label="Текущий профиль"><option value="">Добавьте профиль</option></select><button class="icon-button framed" id="home-add-profile" aria-label="Добавить профиль" title="Добавить профиль"><svg aria-hidden="true"><use href="#i-plus"/></svg></button></div></div>
+     <div class="quick-settings">
+      <div><label for="home-capture">Режим</label><div class="control-pair"><select id="home-capture"><option value="local">Локальный прокси</option><option value="system">Системный прокси</option><option value="tun">TUN · все приложения</option></select><button class="icon-button framed" data-panel="settings" aria-label="Настройки подключения" title="Настройки подключения"><svg aria-hidden="true"><use href="#i-settings"/></svg></button></div></div>
+      <div><label for="home-preset">Маршрут</label><div class="control-pair"><select id="home-preset"><option value="ru-direct">РФ напрямую</option><option value="all">Всё через VPN</option><option value="selected">Только выбранное</option><option value="original">Правила JSON</option></select><button class="icon-button framed" data-panel="routing" aria-label="Правила маршрутизации" title="Правила маршрутизации"><svg aria-hidden="true"><use href="#i-route"/></svg></button></div></div>
+     </div>
+     <p class="home-save-status" id="home-save-status" role="status"></p>
+    </div>
+    <div class="connection-actions"><button class="connect-button" id="connect-button" disabled aria-keyshortcuts="Control+Enter"><svg class="connection-seal" aria-hidden="true"><use href="#i-gate"/></svg><span>Подготовка…</span><small>Ctrl + Enter</small></button><button class="browser-button" id="browser-button" data-action="open_browser" hidden>Открыть браузер<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></div>
+   </section>
+    <section class="health-card"><div class="section-heading"><h3>Проверка связи</h3><button class="secondary" id="check-button" data-action="check_sites" disabled>Проверить</button></div><div id="home-sites" class="home-sites" aria-live="polite"><p class="muted">Подключитесь, чтобы проверить доступность сайтов.</p></div><div class="home-endpoints"><button data-copy="127.0.0.1:11809" title="Скопировать HTTP-прокси"><span>HTTP</span><code>127.0.0.1:11809</code><svg aria-hidden="true"><use href="#i-copy"/></svg></button><button data-copy="127.0.0.1:11808" title="Скопировать SOCKS5-прокси"><span>SOCKS5</span><code>127.0.0.1:11808</code><svg aria-hidden="true"><use href="#i-copy"/></svg></button></div><button class="text-button health-details" data-panel="activity">События и история<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></section>
+    <section class="home-library surface"><div class="section-heading"><h3>Профили</h3><button class="text-button" data-panel="profiles">Управление<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></div><div id="home-profile-list"></div></section>
+   </div>
+   <div class="home-telemetry">
+   <section class="metrics" aria-label="Статистика сессии">
+    <div class="metric"><span class="metric-label"><svg aria-hidden="true"><use href="#i-down"/></svg>Получение</span><strong id="download-rate">0 Б/с</strong><small>Всего <span id="download-total">0 Б</span></small></div>
+    <div class="metric"><span class="metric-label"><svg aria-hidden="true"><use href="#i-up"/></svg>Отправка</span><strong id="upload-rate">0 Б/с</strong><small>Всего <span id="upload-total">0 Б</span></small></div>
+    <div class="metric"><span class="metric-label"><svg aria-hidden="true"><use href="#i-activity"/></svg>Задержка HTTPS</span><strong id="latency">—</strong><small id="country">Ещё не проверена</small></div>
+    <div class="metric"><span class="metric-label"><svg aria-hidden="true"><use href="#i-clock"/></svg>Время сессии</span><strong id="uptime">00:00:00</strong><small id="reconnect-count">Нет переподключений</small></div>
+   </section>
+    <section class="traffic-card"><div class="section-heading"><div class="section-title"><h3>Трафик</h3><span class="chart-period">2 минуты</span></div><div class="chart-legend"><span class="legend-down">Получение</span><span class="legend-up">Отправка</span></div></div><div class="chart-wrap"><div class="chart-scale"><span id="chart-max">0 Б/с</span><span>0</span></div><svg id="traffic-chart" viewBox="0 0 1000 86" preserveAspectRatio="none" role="img" aria-label="Скорость получения и отправки за последние две минуты"><path class="gridline" d="M0 1H1000M0 22H1000M0 43H1000M0 64H1000M0 85H1000"/><path id="chart-area"/><path id="chart-down"/><path id="chart-up"/></svg><span class="chart-empty" id="chart-empty">Нет данных</span></div><div class="chart-footer"><span>−2 мин</span><span id="direct-total">Напрямую · 0 Б</span><span>Сейчас</span></div></section>
+    <section class="home-events surface"><div class="section-heading"><h3>Последние события</h3><button class="text-button" data-panel="activity">Все события<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></div><ol id="home-event-list" class="activity-list"></ol></section>
+   </div>
+   <footer class="app-footer"><span id="session-note" hidden></span></footer>
+  </div>
+  <section id="panel-view" class="panel-view" aria-labelledby="page-title" hidden><div class="locked-notice" id="locked-notice" hidden><svg aria-hidden="true"><use href="#i-lock"/></svg><span>Чтобы изменить подключение, сначала отключитесь.</span><button class="text-button" id="unlock-settings">Отключить</button></div><div id="drawer-body" class="page-body"></div></section>
+ </main>
+</div>
+<div class="toast" id="toast" role="status" hidden><svg aria-hidden="true" id="toast-icon"><use href="#i-check"/></svg><span id="toast-message"></span><button class="icon-button small-button" id="toast-close" aria-label="Закрыть сообщение"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
+<dialog id="confirm-dialog" aria-labelledby="confirm-title"><div class="dialog-icon"><svg aria-hidden="true"><use href="#i-trash"/></svg></div><h2 id="confirm-title">Удалить профиль?</h2><p id="confirm-message"></p><div class="dialog-actions"><button class="secondary" id="confirm-cancel">Оставить</button><button class="danger-button" id="confirm-delete">Удалить профиль</button></div></dialog>
+
+<template id="profiles-template">
+ <div class="profiles-toolbar"><label class="search-field"><svg aria-hidden="true"><use href="#i-search"/></svg><input type="search" id="profile-search" placeholder="Найти профиль" aria-label="Найти профиль" autocomplete="off"></label><button class="primary" id="add-profile"><svg aria-hidden="true"><use href="#i-plus"/></svg>Добавить профиль</button></div>
+ <div class="profiles-layout"><div><div class="profile-list" id="profile-list"></div></div><section class="surface profile-editor" id="profile-editor" hidden aria-labelledby="editor-title"><div class="editor-heading"><div><h3 id="editor-title">Новый профиль</h3></div><button class="icon-button small-button" id="cancel-editor" aria-label="Закрыть редактор"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div><form id="profile-form"><label>Название <span class="field-optional">необязательно</span><input id="edit-name" maxlength="120" placeholder="Например, домашний сервер" autocomplete="off"></label><label>Ссылка или конфигурация<textarea id="edit-profile" class="secret" rows="6" spellcheck="false" autocomplete="off" placeholder="Вставьте ссылку или JSON…" required></textarea></label><div class="editor-tools"><button class="text-button" type="button" id="import-file"><svg aria-hidden="true"><use href="#i-down"/></svg>Из файла</button><label class="compact-check"><input type="checkbox" id="show-secret">Показать ключ</label></div><p class="field-help">VLESS, VMess, Trojan, Shadowsocks или JSON Xray.</p><p class="inline-error" id="profile-error" role="alert" hidden></p><button class="primary full-width" id="save-profile" type="submit">Сохранить профиль</button></form></section></div>
+</template>
+<template id="routing-template">
+ <form id="routing-form"><div class="section-heading"><h2 class="section-label">Куда направлять трафик</h2></div><div class="preset-options">
+ <label class="preset-option"><input type="radio" name="preset" value="ru-direct"><span class="preset-icon"><svg aria-hidden="true"><use href="#i-route"/></svg></span><span><strong>РФ напрямую</strong><small>Российские сайты — напрямую. Остальные — через VPN.</small></span><i></i></label>
+ <label class="preset-option"><input type="radio" name="preset" value="all"><span class="preset-icon"><svg aria-hidden="true"><use href="#i-globe"/></svg></span><span><strong>Всё через VPN</strong><small>Весь внешний трафик — через сервер. Локальная сеть доступна.</small></span><i></i></label>
+ <label class="preset-option"><input type="radio" name="preset" value="selected"><span class="preset-icon"><svg aria-hidden="true"><use href="#i-check"/></svg></span><span><strong>Только выбранное</strong><small>Ваши правила и списки блокировок — через VPN. Остальное — напрямую.</small></span><i></i></label>
+ <label class="preset-option" id="original-option"><input type="radio" name="preset" value="original"><span class="preset-icon"><svg aria-hidden="true"><use href="#i-server"/></svg></span><span><strong>Правила из JSON</strong><small>Маршрутизация из конфигурации. Исключения ниже не применяются.</small></span><i></i></label>
+ </div><section class="surface exceptions-section"><div class="section-heading"><div><h3>Исключения</h3><p class="field-help">Домен, IP или подсеть — по одному в строке. Поддомены учитываются.</p></div><span class="subtle-label">Необязательно</span></div><div class="exception-grid"><label><span class="field-dot direct-dot"></span>Напрямую<textarea name="direct" rows="3" placeholder="example.ru&#10;192.168.1.0/24" spellcheck="false"></textarea></label><label><span class="field-dot proxy-dot"></span>Через VPN<textarea name="proxy" rows="3" placeholder="chatgpt.com&#10;openai.com" spellcheck="false"></textarea></label><label><span class="field-dot block-dot"></span>Заблокировать<textarea name="block" rows="3" placeholder="example.com" spellcheck="false"></textarea></label></div><p class="field-help priority-hint">При совпадении правил: заблокировать → VPN → напрямую.</p><label class="toggle-row"><span><strong>Российские IP напрямую</strong><small>Дополняет правила доменов. Может затронуть зарубежные сайты с IP в РФ.</small></span><input type="checkbox" name="ru_ip" role="switch"></label></section><p class="inline-error" id="routing-error" hidden role="alert"></p><div class="save-bar"><span id="routing-save-status">Изменения применятся при следующем подключении</span><button class="primary" type="submit">Сохранить маршруты</button></div></form>
+ <div class="tools-grid"><section class="surface"><div class="card-heading"><span class="setting-icon"><svg aria-hidden="true"><use href="#i-search"/></svg></span><h3>Проверить маршрут</h3></div><p class="field-help">Узнайте, какое правило сработает для сайта.</p><form class="inline-form" id="explain-form"><input id="explain-target" placeholder="Сайт или IP" aria-label="Сайт или IP" required><button class="secondary" type="submit">Проверить</button></form><p class="explanation" id="route-explanation" role="status"></p></section><section class="surface"><div class="card-heading"><span class="setting-icon"><svg aria-hidden="true"><use href="#i-refresh"/></svg></span><h3>Списки для России</h3></div><p class="field-help">Заблокированные сайты через VPN имеют приоритет над российскими доменами.</p><p class="rule-version" id="rules-version"></p><div class="button-row"><button class="secondary" data-action="update_rules">Обновить списки</button><button class="text-button" data-action="rollback_rules">Откатить</button></div></section></div>
+</template>
+<template id="settings-template">
+ <div class="settings-layout"><div><form id="settings-form"><section class="surface"><div class="card-heading"><span class="setting-icon"><svg aria-hidden="true"><use href="#i-monitor"/></svg></span><h3>Подключение</h3></div><label>Режим подключения<select name="capture"><option value="local">Локальный прокси</option><option value="system">Системный прокси Windows</option><option value="tun">TUN · все приложения</option></select></label><div class="info-box" id="capture-hint"></div><div class="proxy-addresses"><button type="button" data-copy="127.0.0.1:11809" title="Скопировать HTTP-прокси"><span>HTTP</span><code>127.0.0.1:11809</code><svg aria-hidden="true"><use href="#i-copy"/></svg></button><button type="button" data-copy="127.0.0.1:11808" title="Скопировать SOCKS5-прокси"><span>SOCKS5</span><code>127.0.0.1:11808</code><svg aria-hidden="true"><use href="#i-copy"/></svg></button></div><label>DNS<select name="dns"><option value="system">Системный</option><option value="doh">Защищённый DNS через VPN</option></select></label><label class="toggle-row"><span><strong>Автопереподключение</strong><small>Восстановить связь при обрыве или завершении ядра.</small></span><input type="checkbox" name="auto_reconnect" role="switch"></label></section><p class="inline-error" id="settings-error" role="alert" hidden></p><div class="save-bar"><span id="settings-save-status">Для следующего подключения</span><button class="primary" type="submit">Сохранить настройки</button></div></form></div><div class="settings-secondary"><section class="surface"><div class="card-heading"><span class="setting-icon"><svg aria-hidden="true"><use href="#i-sun"/></svg></span><h3>Интерфейс</h3></div><label>Оформление<select id="theme-select"><option value="dark">Тёмное</option><option value="light">Светлое</option><option value="system">Как в системе</option></select></label><label class="toggle-row"><span><strong>Уменьшить анимации</strong></span><input type="checkbox" id="reduce-motion" role="switch"></label></section><section class="surface"><div class="card-heading"><span class="setting-icon"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><h3>Восстановление сети</h3></div><p class="field-help">После отключения или сбоя Yukiwire восстанавливает свои изменения в сети.</p><div class="button-row"><button class="secondary" data-action="recover_network">Проверить</button><button class="text-button" data-action="export_diagnostics">Сохранить отчёт<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></div><p class="field-help">В отчёте нет ключей, адреса сервера и содержимого запросов.</p></section></div></div>
+</template>
+<template id="activity-template">
+ <div class="activity-toolbar"><div class="segmented-control" aria-label="Раздел активности"><button class="selected" data-activity-tab="connection" aria-pressed="true">Соединение</button><button data-activity-tab="history" aria-pressed="false">История</button></div><button class="text-button" data-action="export_diagnostics"><svg aria-hidden="true"><use href="#i-down"/></svg>Сохранить отчёт</button></div><div id="connection-activity"><section class="surface"><div class="section-heading"><div><h3>Доступность сайтов</h3><p class="field-help">Проверка HTTPS через ваше подключение.</p></div><button class="secondary" data-action="check_sites" id="activity-check"><svg aria-hidden="true"><use href="#i-refresh"/></svg>Проверить сайты</button></div><div class="exit-info" id="exit-info">Страна выхода ещё не проверена.</div><div class="sites-list" id="sites-list"></div><p class="field-help">Ответ 403 или 429 может означать защиту сайта от автоматических запросов.</p></section><section class="surface events-section"><div class="section-heading"><h3>События сессии</h3><span class="subtle-label">Последние 100</span></div><ol class="activity-list" id="activity-list"></ol></section></div><section id="analytics-box" class="surface" hidden></section>
+</template>
+</body>
+</html>
