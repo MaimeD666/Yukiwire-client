@@ -22,19 +22,22 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       BUILD_RUN_ID: '38426908809'
-      RELEASE_COMMIT: d2e7998597b8d8df068bbf2a3a00079627b60b08
+      BUILD_COMMIT: d2e7998597b8d8df068bbf2a3a00079627b60b08
+      RELEASE_COMMIT: ${{ github.sha }}
       RELEASE_TAG: v0.4
       ARTIFACT_NAME: Yukiwire-0.4-win-x64
     steps:
       - name: Check the tested source revision
         run: |
           gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN_ID" > build-run.json
+          gh api "repos/$GH_REPO/git/trees/$BUILD_COMMIT?recursive=1" > tested-tree.json
+          gh api "repos/$GH_REPO/git/trees/$RELEASE_COMMIT?recursive=1" > release-tree.json
           python3 - <<'PY'
           import json, os
           run = json.load(open('build-run.json'))
           expected = {
               'status': 'completed', 'conclusion': 'success',
-              'head_sha': os.environ['RELEASE_COMMIT'], 'head_branch': 'main',
+              'head_sha': os.environ['BUILD_COMMIT'], 'head_branch': 'main',
               'event': 'push', 'path': '.github/workflows/check.yml',
           }
           for key, value in expected.items():
@@ -42,6 +45,15 @@ jobs:
                   raise SystemExit(f'Unexpected build {key}: {run.get(key)!r}')
           if run['repository']['full_name'] != os.environ['GH_REPO']:
               raise SystemExit('Build belongs to another repository')
+          def sources(filename):
+              tree = json.load(open(filename))
+              if tree.get('truncated'):
+                  raise SystemExit('Incomplete source tree')
+              return {entry['path']: (entry['mode'], entry['type'], entry['sha'])
+                      for entry in tree['tree'] if entry['type'] != 'tree'
+                      and entry['path'] != '.github/workflows/release.yml'}
+          if sources('tested-tree.json') != sources('release-tree.json'):
+              raise SystemExit('Release source differs from the tested build')
           PY
 
       - name: Download and verify the tested packages
