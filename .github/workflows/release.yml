@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-v0.4-preview
+  group: release-v0.4
   cancel-in-progress: false
 
 jobs:
@@ -21,10 +21,10 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      BUILD_RUN_ID: '37209255824'
-      RELEASE_COMMIT: 5b859940f9124dff2b6e1fb2985a283edd5a33c8
-      RELEASE_TAG: v0.4-preview
-      ARTIFACT_NAME: Yukiwire-0.4-preview-win-x64
+      BUILD_RUN_ID: '38426908809'
+      RELEASE_COMMIT: d2e7998597b8d8df068bbf2a3a00079627b60b08
+      RELEASE_TAG: v0.4
+      ARTIFACT_NAME: Yukiwire-0.4-win-x64
     steps:
       - name: Check the tested source revision
         run: |
@@ -81,7 +81,17 @@ jobs:
 
           Добавь свою ссылку подключения и нажми «Подключиться». Сервер в комплект не входит.
 
-          Первая предварительная версия. Проверены установка, обновление, удаление и работа прокси. Контрольные суммы файлов — в `SHA256SUMS.txt`.
+          В этой версии:
+
+          - Игры без VPN: Dota 2, Counter-Strike 2 и выбранные `.exe` подключаются напрямую; остальные приложения сохраняют свои маршруты.
+          - Обновлённый экран маршрутов: «Все, кроме РФ», «Все сайты», «По списку» и понятные исключения.
+          - Сохранение настроек при включённом VPN и отдельный переключатель «Переподключаться после изменений».
+          - Системный прокси вместе с TUN для браузеров, с восстановлением исходных настроек сети при отключении.
+          - Проверки доступности сайтов через фактический путь TUN и сравнение с VPN-прокси.
+
+          Если YouTube теряет связь при совместной работе TUN и zapret, включите «Системный прокси вместе с TUN» в настройках подключения. Совместимость чистого TUN с этой конфигурацией сетевого фильтра пока не исправлена.
+
+          Контрольные суммы установщика и portable-архива — в `SHA256SUMS.txt`.
           NOTES
           gh api --method POST "repos/$GH_REPO/git/refs" \
             -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$RELEASE_COMMIT" > tag.json
@@ -89,8 +99,8 @@ jobs:
             "release-assets/$ARTIFACT_NAME-setup.exe" \
             "release-assets/$ARTIFACT_NAME.zip" \
             release-assets/SHA256SUMS.txt \
-            --draft --prerelease --verify-tag --target "$RELEASE_COMMIT" \
-            --title 'Yukiwire 0.4 preview' --notes-file release-notes.md
+            --draft --prerelease=false --verify-tag --target "$RELEASE_COMMIT" \
+            --title 'Yukiwire 0.4' --notes-file release-notes.md
 
       - name: Verify uploaded assets and publish
         run: |
@@ -101,8 +111,8 @@ jobs:
           import hashlib, json, os, pathlib
           release = json.load(open('release.json'))
           tag = json.load(open('tag.json'))
-          if not release['draft'] or not release['prerelease']:
-              raise SystemExit('Expected a draft prerelease')
+          if not release['draft'] or release['prerelease']:
+              raise SystemExit('Expected a regular draft release')
           if release['target_commitish'] != os.environ['RELEASE_COMMIT']:
               raise SystemExit('Wrong release target')
           if tag['object']['type'] != 'commit' or tag['object']['sha'] != os.environ['RELEASE_COMMIT']:
@@ -116,4 +126,12 @@ jobs:
               if asset['state'] != 'uploaded' or asset['size'] != path.stat().st_size or asset.get('digest') != digest:
                   raise SystemExit(f'Upload verification failed: {path.name}')
           PY
-          gh release edit "$RELEASE_TAG" --draft=false
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest
+          gh api "repos/$GH_REPO/releases/latest" > latest.json
+          python3 - <<'PY'
+          import json, os
+          release = json.load(open('latest.json'))
+          if release['tag_name'] != os.environ['RELEASE_TAG'] or release['draft'] or release['prerelease']:
+              raise SystemExit('Release was not published as the latest regular release')
+          print(release['html_url'])
+          PY
