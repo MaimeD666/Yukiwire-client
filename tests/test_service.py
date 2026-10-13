@@ -179,7 +179,8 @@ class ServiceTests(unittest.TestCase):
         def verified(**kwargs):
             self.assertTrue(session.guard.arm.call_args.kwargs['system_proxy'])
             session.guard.apply_proxy.assert_not_called()
-        with patch('yukiwire.backend.ctypes.windll.shell32.IsUserAnAdmin', return_value=1), \
+        with patch('yukiwire.backend.CORE') as core_path, \
+             patch('yukiwire.backend.ctypes.windll.shell32.IsUserAnAdmin', return_value=1), \
              patch('yukiwire.backend.tun_preflight'), \
              patch('yukiwire.backend.tun_ready', return_value=True) as ready, \
              patch('yukiwire.backend.conflicts', return_value={'other_proxy': False, 'other_vpn': False}), \
@@ -188,6 +189,7 @@ class ServiceTests(unittest.TestCase):
              patch('yukiwire.backend.socket.socket') as socket, \
              patch('yukiwire.backend.CoreProcess', side_effect=start_core), \
              patch('yukiwire.backend.probe_https', side_effect=verified) as probe:
+            core_path.parent.__truediv__.return_value.is_file.return_value = True
             rules.return_value.tags.return_value = {}
             socket.return_value.__enter__.return_value.connect_ex.return_value = 0
             profile = 'vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls'
