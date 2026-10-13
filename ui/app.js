@@ -4,17 +4,23 @@
   const defaults = {
     preset: 'ru-direct',
     capture: 'local',
+    tun_system_proxy: false,
     dns: 'system',
     ru_ip: false,
     auto_reconnect: true,
+    reconnect_on_change: false,
     direct: '',
     proxy: '',
-    block: ''
+    block: '',
+    game_mode: false,
+    game_processes: 'dota2.exe'
   };
   const state = {
     ready: false,
     phase: 'idle',
     active: false,
+    activeSettings: null,
+    settingsPending: false,
     settings: {
       ...defaults
     },
@@ -137,6 +143,10 @@
     return state.active || ['connecting', 'stopping', 'reconnecting'].includes(state.phase);
   }
 
+  function settingsLocked() {
+    return !state.ready || ['connecting', 'stopping', 'reconnecting'].includes(state.phase);
+  }
+
   function conflict() {
     return state.environment.other_proxy || state.environment.other_vpn || state.environment.check_failed;
   }
@@ -145,13 +155,14 @@
     const p = selected();
     text('profile-protocol', p ? String(p.protocol).toUpperCase() : 'Ссылка или JSON-конфигурация');
     const phase = state.phase;
+    const capture = state.activeSettings?.capture || state.settings.capture;
     const busy = ['connecting', 'reconnecting', 'stopping'].includes(phase);
     const view = {
       idle: ['Отключено', p ? '' : 'Добавьте ссылку или файл конфигурации.'],
       connecting: ['Подключение…', ''],
       checking: ['Проверка соединения…', ''],
-      connected: [state.settings.capture === 'local' ? 'Прокси готов' : 'Подключено',
-        state.settings.capture === 'local' ? 'Прокси для отдельного браузера и настроенных приложений.' : ''],
+      connected: [capture === 'local' ? 'Прокси готов' : 'Подключено',
+        capture === 'local' ? 'Прокси для отдельного браузера и настроенных приложений.' : ''],
       reconnecting: ['Переподключение…', ''],
       stopping: ['Отключение…', 'Восстанавливаем настройки сети.'],
       unverified: ['Не удалось проверить связь', 'Откройте «Активность», чтобы узнать причину.'],
@@ -184,8 +195,8 @@
     text('header-status', state.ready || phase === 'unavailable' ? ({connected: 'На связи', checking: 'Проверка связи', unverified: 'Нужна проверка', unavailable: 'Нет связи с сервисом'}[phase] || view[0]) : 'Запуск');
     $('header-dot').className = 'service-dot' + (phase === 'connected' ? ' active' : ['unverified', 'unavailable'].includes(phase) ? ' warning' : '');
     document.body.dataset.connection = phase;
-    document.body.dataset.capture = state.settings.capture;
-    $('locked-notice').hidden = !locked() || !['profiles', 'routing', 'settings'].includes(state.panel);
+    document.body.dataset.capture = capture;
+    $('locked-notice').hidden = !locked() || state.panel !== 'profiles';
     $('unlock-settings').disabled = phase === 'stopping';
     renderHomeControls();
     renderHomeSites();
@@ -222,18 +233,19 @@
     const settings = pendingSettings || state.settings;
     const capture = $('home-capture'), preset = $('home-preset');
     capture.value = settings.capture;
+    capture.querySelector('[value=tun]').textContent = settings.tun_system_proxy ? 'TUN + системный прокси' : 'TUN · все приложения';
     preset.value = settings.preset;
-    capture.disabled = preset.disabled = disabled;
+    capture.disabled = preset.disabled = settingsLocked() || !!pendingSettings;
     capture.querySelector('[value=system]').disabled = !!conflict();
     capture.querySelector('[value=tun]').disabled = !!conflict();
     preset.querySelector('[value=original]').disabled = !String(selected()?.protocol).toLowerCase().includes('json');
-    text('home-save-status', pendingSettings ? 'Сохранение…' : '');
-    capture.title = preset.title = locked() ? 'Отключитесь, чтобы изменить настройку' : '';
-    document.querySelector('.home-endpoints').hidden = state.settings.capture !== 'local';
+    text('home-save-status', pendingSettings ? 'Сохранение…' : state.active && state.settingsPending ? 'Есть изменения для следующего подключения' : '');
+    capture.title = preset.title = '';
+    document.querySelector('.home-endpoints').hidden = (state.activeSettings?.capture || state.settings.capture) !== 'local';
   }
 
   function saveHomeSetting(key, value) {
-    if (locked() || !state.ready || pendingSettings) { renderHomeControls(); return; }
+    if (settingsLocked() || pendingSettings) { renderHomeControls(); return; }
     if (state.settings[key] === value) return;
     savePanel = 'home';
     pendingSettings = {...state.settings, [key]: value};
@@ -259,6 +271,7 @@
       const status = result.accessible ? `${result.elapsed_ms} мс` : result.transport_ok ? `HTTP ${result.http_status}` : 'Нет связи';
       row.append(node('span', '', result.target), node('span', 'site-state' +
         (result.accessible ? '' : result.transport_ok ? ' denied' : ' failed'), status));
+      row.title = result.message || '';
       box.append(row);
     }
     if (state.checking) box.append(node('p', 'muted', 'Обновляем результаты…'));
@@ -355,6 +368,7 @@
         state.selected = data.selected;
         state.environment = data.environment || {};
         state.rules = data.rules || {};
+        state.settingsPending = !!data.settings_pending;
         if (data.warning) notice(data.warning, true, true);
         break;
       case 'profiles':
@@ -395,6 +409,8 @@
           ...data.settings
         };
         pendingSettings = null;
+        state.settingsPending = !!data.settings_pending;
+        if (data.applying) state.phase = 'reconnecting';
         drafts.delete(savePanel);
         if (state.panel === savePanel) {
           fillSettings($(savePanel === 'routing' ? 'routing-form' : 'settings-form'));
@@ -405,7 +421,8 @@
           fillSettings($(state.panel + '-form'));
           restoreDraft(state.panel);
         }
-        if (savePanel !== 'home') notice(savePanel === 'routing' ? 'Маршруты сохранены.' : 'Настройки сохранены.');
+        if (savePanel !== 'home') notice(data.applying ? 'Сохранено. Переподключаем VPN…' :
+          state.settingsPending ? 'Сохранено для следующего подключения.' : 'Изменения сохранены.');
         break;
       case 'starting':
         state.phase = 'connecting';
@@ -426,12 +443,15 @@
           state.samples = [];
           renderChart();
         }
-        state.settings.capture = data.capture || state.settings.capture;
+        state.activeSettings = {...state.settings, ...data.active_settings, capture: data.capture || state.settings.capture};
+        state.settingsPending = !!data.settings_pending;
         break;
       case 'stopped':
         if (state.transient && !state.transient.text) state.transient = null;
         state.phase = 'idle';
         state.active = false;
+        state.activeSettings = null;
+        state.settingsPending = false;
         state.checking = false;
         text('download-rate', '0 Б/с');
         text('upload-rate', '0 Б/с');
@@ -517,6 +537,16 @@
         pendingSettings = null;
         notice('Сервис завершился. Перезапустите приложение для проверки восстановления.', true, true);
         break;
+      case 'game_selected':
+        if ($('routing-form') && !settingsLocked() && !pendingSettings) {
+          const field = $('routing-form').elements.namedItem('game_processes');
+          const games = gameEntries(field.value);
+          if (typeof data.path === 'string' && !games.includes(data.path)) games.push(data.path);
+          field.value = games.join('\n');
+          refreshGameControls();
+          updateSaveState();
+        }
+        break;
       case 'error':
         state.checking = false;
         rulesBusy = false;
@@ -525,6 +555,7 @@
         controlsLocked = null;
         if (data.operation === 'save_settings') {
           pendingSettings = null;
+          if (state.phase === 'reconnecting') state.phase = state.active ? 'unverified' : 'idle';
           updateSaveState();
         }
         if (data.operation === 'delete_profile' && state.panel === 'profiles') renderProfiles();
@@ -621,7 +652,7 @@
       draft.fields = {};
       for (const el of form.elements) {
         if (!el.name || (el.type === 'radio' && !el.checked)) continue;
-        const value = el.type === 'checkbox' ? el.checked : el.value;
+        const value = el.type === 'checkbox' ? el.checked : el.dataset.boolean ? el.value === 'true' : el.value;
         if (value !== state.settings[el.name]) draft.fields[el.name] = value;
       }
     }
@@ -661,7 +692,7 @@
     for (const name of ['routing', 'settings']) {
       const form = $(name + '-form');
       if (!form) continue;
-      form.querySelectorAll('input,textarea,select').forEach(el => el.disabled = isLocked || !!pendingSettings);
+      form.querySelectorAll('input,textarea,select').forEach(el => el.disabled = settingsLocked() || !!pendingSettings);
       if (name === 'routing' && form.elements.namedItem('preset').value === 'original') {
         ['direct', 'proxy', 'block', 'ru_ip'].forEach(key => form.elements.namedItem(key).disabled = true);
       }
@@ -671,6 +702,8 @@
         mode.querySelector('[value=tun]').disabled = !!conflict();
       }
     }
+    refreshGameControls();
+    refreshRoutingControls();
     if ($('activity-check')) $('activity-check').disabled = !state.active || state.checking || state.phase === 'stopping';
     const recovery = document.querySelector('[data-action="recover_network"]');
     if (recovery) recovery.disabled = isLocked;
@@ -686,10 +719,12 @@
       const dirty = Object.keys(defaults).some(key => next[key] !== state.settings[key]);
       const busy = !!pendingSettings;
       const button = form.querySelector('button[type=submit]');
-      button.disabled = !dirty || locked() || busy || !state.ready;
-      button.textContent = busy ? 'Сохраняем…' : name === 'routing' ? 'Сохранить маршруты' : 'Сохранить настройки';
+      button.disabled = !dirty || settingsLocked() || busy;
+      button.textContent = busy ? 'Сохраняем…' : state.active && next.reconnect_on_change ? 'Сохранить и применить' : 'Сохранить';
       form.querySelector('.save-bar').classList.toggle('dirty', dirty);
-      text(name + '-save-status', busy ? 'Сохраняем изменения' : dirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены');
+      text(name + '-save-status', busy ? 'Сохраняем изменения' : state.phase === 'reconnecting' ? 'Переподключаем VPN…' :
+        dirty ? state.active ? next.reconnect_on_change ? 'VPN переподключится после сохранения' : 'Для следующего подключения' : 'Есть изменения' :
+          state.active && state.settingsPending ? 'Сохранено · ждёт следующего подключения' : 'Все изменения сохранены');
     }
   }
 
@@ -857,7 +892,7 @@
     for (const key of Object.keys(defaults)) {
       const element = form.elements.namedItem(key);
       if (element) {
-        next[key] = ['ru_ip', 'auto_reconnect'].includes(key) ? element.checked : element.value;
+        next[key] = element.type === 'checkbox' ? element.checked : element.dataset?.boolean ? element.value === 'true' : element.value;
       }
     }
     return next;
@@ -876,10 +911,7 @@
 
   function saveSettings(form, panel) {
     if (pendingSettings || !state.ready) return;
-    if (locked()) {
-      notice('Отключитесь перед изменением настроек.', true);
-      return;
-    }
+    if (settingsLocked()) return;
     savePanel = panel;
     pendingSettings = formSettings(form);
     $(panel + '-error').hidden = true;
@@ -887,6 +919,48 @@
     send('save_settings', {
       settings: pendingSettings
     });
+  }
+
+  function gameEntries(value) {
+    return [...new Set(value.split(/\r?\n/).map(line => line.trim().replace(/^"(.*)"$/, '$1').replace(/\\/g, '/')).filter(Boolean))];
+  }
+
+  function refreshGameControls() {
+    const form = $('routing-form');
+    if (!form) return;
+    const original = form.elements.namedItem('preset').value === 'original';
+    const toggle = form.elements.namedItem('game_mode');
+    const field = form.elements.namedItem('game_processes');
+    const busy = settingsLocked() || !!pendingSettings;
+    toggle.disabled = busy || original;
+    field.disabled = busy || original || !toggle.checked;
+    $('game-selection').hidden = !toggle.checked;
+    $('game-mode-hint').hidden = !toggle.checked;
+    text('game-mode-hint', state.settings.capture === 'tun'
+      ? 'После применения маршрутов перезапустите игру.'
+      : 'Для всего трафика игр, включая UDP, выберите TUN в настройках.');
+    const games = gameEntries(field.value);
+    form.querySelectorAll('[data-game]').forEach(button => {
+      button.disabled = field.disabled;
+      button.setAttribute('aria-pressed', String(games.includes(button.dataset.game)));
+    });
+    $('choose-game').disabled = field.disabled;
+  }
+
+  function refreshRoutingControls() {
+    const form = $('routing-form');
+    if (!form) return;
+    const preset = form.elements.namedItem('preset').value;
+    $('ru-detection').hidden = preset !== 'ru-direct';
+    $('managed-routes').hidden = preset === 'original';
+    $('json-routing-note').hidden = preset !== 'original';
+    text('preset-note', preset === 'ru-direct' ? 'Заблокированные сайты автоматически идут через VPN.' :
+      preset === 'all' ? 'Локальная сеть остаётся доступна напрямую.' : 'Список заблокированных дополняется вашими исключениями.');
+    $('preset-note').hidden = preset === 'original';
+    for (const key of ['direct', 'proxy', 'block']) {
+      const count = form.elements.namedItem(key).value.trim().split(/[\s,;]+/).filter(Boolean).length;
+      text('count-' + key, count || '');
+    }
   }
 
   function setupRouting() {
@@ -900,19 +974,39 @@
       e.preventDefault();
       saveSettings(form, 'routing');
     };
-    form.querySelectorAll('input,textarea,button').forEach(el => el.disabled = locked());
+    form.querySelectorAll('input,textarea,button').forEach(el => el.disabled = settingsLocked());
     const original = () => {
       const isOriginal = form.elements.namedItem('preset').value === 'original';
       ['direct', 'proxy', 'block', 'ru_ip'].forEach(k => form.elements.namedItem(k).disabled =
-        locked() || isOriginal);
+        settingsLocked() || isOriginal);
     };
-    form.onchange = () => { original(); updateSaveState(); };
-    form.oninput = updateSaveState;
+    form.onchange = () => { original(); refreshGameControls(); refreshRoutingControls(); updateSaveState(); };
+    form.oninput = () => { refreshGameControls(); refreshRoutingControls(); updateSaveState(); };
+    form.querySelectorAll('[data-game]').forEach(button => {
+      button.onclick = () => {
+        const field = form.elements.namedItem('game_processes');
+        const games = gameEntries(field.value);
+        field.value = (games.includes(button.dataset.game)
+          ? games.filter(game => game !== button.dataset.game) : [...games, button.dataset.game]).join('\n');
+        refreshGameControls();
+        updateSaveState();
+      };
+    });
+    $('choose-game').onclick = () => send('choose_game');
     original();
+    refreshGameControls();
+    const processLabel = node('label', '', 'Процесс игры · необязательно');
+    const processInput = node('input');
+    processInput.id = 'explain-process';
+    processInput.placeholder = 'dota2.exe или полный путь';
+    processInput.spellcheck = false;
+    processLabel.append(processInput);
+    $('explain-form').before(processLabel);
     $('explain-form').onsubmit = e => {
       e.preventDefault();
       send('explain', {
         target: $('explain-target').value,
+        process: $('explain-process').value,
         settings: formSettings(form)
       });
     };
@@ -927,6 +1021,7 @@
   }
 
   function setRulesBusy() {
+    if ($('rules-lock-hint')) $('rules-lock-hint').hidden = !locked();
     document.querySelectorAll('[data-action="update_rules"],[data-action="rollback_rules"]').forEach(
       el => el.disabled = rulesBusy || locked());
   }
@@ -940,6 +1035,7 @@
       mode.querySelector('[value=tun]').disabled = true;
     }
     const hint = () => {
+      $('tun-proxy-option').hidden = mode.value !== 'tun';
       text('capture-hint', {
         local: 'Для отдельного браузера или приложений с ручной настройкой прокси.',
         system: 'Браузеры и программы, которые используют системный прокси Windows. Для UDP и остальных программ используйте TUN.',
@@ -958,7 +1054,7 @@
       e.preventDefault();
       saveSettings(form, 'settings');
     };
-    form.querySelectorAll('input,select').forEach(el => { el.disabled = locked(); });
+    form.querySelectorAll('input,select').forEach(el => { el.disabled = settingsLocked(); });
     $('theme-select').value = theme;
     $('theme-select').onchange = e => applyTheme(e.target.value);
     $('reduce-motion').checked = document.body.classList.contains('reduce-motion');
@@ -987,7 +1083,8 @@
       const row = node('div', 'site-row');
       const caption = node('div');
       caption.append(node('strong', '', item.target), node('small', '', item.transport_ok ?
-        `HTTPS работает · ${item.elapsed_ms} мс` : 'HTTPS-соединение не установлено'));
+        `HTTPS работает${item.path === 'tun' ? ' через TUN' : ''} · ${item.elapsed_ms} мс` :
+        item.message || 'HTTPS-соединение не установлено'));
       row.append(caption, node('span', 'site-state' + (item.accessible ? '' : item.transport_ok ?
           ' denied' : ' failed'), item.accessible ? `HTTP ${item.http_status}` : item
         .transport_ok ? `Сайт: ${item.http_status}` : 'Нет связи'));

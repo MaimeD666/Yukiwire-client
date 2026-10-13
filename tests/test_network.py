@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 from contextlib import nullcontext
-from yukiwire.network import ProxyLease, add_tun, new_tun, recover_journal, conflicts
+from yukiwire.network import NetworkGuard, ProxyLease, add_tun, new_tun, recover_journal, conflicts
 
 
 class Journal:
@@ -114,6 +114,81 @@ class ProxyRecoveryTests(unittest.TestCase):
         self.lease.apply()
         self.lease.recover()
         self.assertEqual(self.adapter.read(), self.original)
+
+    def prepare_combined(self):
+        record = self.lease.prepare(100, 200, tun=new_tun())
+        self.journal.value['core_start'] = 456
+        self.assertEqual(record['kind'], 'tun')
+        self.assertTrue(record['system_proxy'])
+        self.assertEqual(self.adapter.writes, [])
+        return record
+
+    def recover_combined(self, cleanup_exit=0):
+        with patch('yukiwire.network.ctypes.windll.shell32.IsUserAnAdmin', return_value=1), \
+             patch('yukiwire.network.subprocess.run', return_value=Mock(returncode=cleanup_exit)) as cleanup:
+            result = self.recover_guarded()
+        cleanup.assert_called_once()
+        self.assertIn(self.last_adapter, cleanup.call_args.args[0])
+        return result
+
+    def test_combined_capture_restores_proxy_and_cleans_only_owned_tun(self):
+        record = self.prepare_combined()
+        self.last_adapter = record['adapter']
+        self.lease.apply()
+        self.assertTrue(self.recover_combined()['restored'])
+        self.assertEqual(self.adapter.read(), self.original)
+        self.assertIsNone(self.journal.value)
+
+    def test_combined_capture_before_proxy_apply_still_recovers_tun(self):
+        record = self.prepare_combined()
+        self.last_adapter = record['adapter']
+        self.assertTrue(self.recover_combined()['restored'])
+        self.assertEqual(self.adapter.writes, [])
+
+    def test_combined_capture_keeps_foreign_proxy_but_removes_own_tun(self):
+        record = self.prepare_combined()
+        self.last_adapter = record['adapter']
+        self.lease.apply()
+        foreign = dict(self.original, flags=3, server='127.0.0.1:2080')
+        self.adapter.write(foreign)
+        self.assertTrue(self.recover_combined()['conflict'])
+        self.assertEqual(self.adapter.read(), foreign)
+        self.assertIsNotNone(self.journal.value)
+
+    def test_combined_capture_restores_proxy_even_when_tun_cleanup_needs_retry(self):
+        record = self.prepare_combined()
+        self.last_adapter = record['adapter']
+        self.lease.apply()
+        with self.assertRaises(RuntimeError):
+            self.recover_combined(cleanup_exit=1)
+        self.assertEqual(self.adapter.read(), self.original)
+        self.assertIsNotNone(self.journal.value)
+        self.assertTrue(self.recover_combined()['restored'])
+
+    def test_guard_applies_combined_proxy_only_for_its_live_core(self):
+        record = self.prepare_combined()
+        guard = NetworkGuard()
+        guard.journal, guard.kind, guard.lease_id = self.journal, 'tun', record['lease_id']
+        with patch('yukiwire.network.journal_lock', return_value=nullcontext()), \
+             patch('yukiwire.network.WinInetProxy', return_value=self.adapter), \
+             patch('yukiwire.network.process_identity', return_value=999):
+            with self.assertRaises(ValueError):
+                guard.apply_proxy()
+        self.assertEqual(self.adapter.writes, [])
+        with patch('yukiwire.network.journal_lock', return_value=nullcontext()), \
+             patch('yukiwire.network.WinInetProxy', return_value=self.adapter), \
+             patch('yukiwire.network.process_identity', return_value=456):
+            guard.apply_proxy()
+        self.assertEqual(self.adapter.read(), record['desired'])
+
+    def test_plain_tun_does_not_apply_a_system_proxy(self):
+        guard = NetworkGuard()
+        guard.journal, guard.kind, guard.lease_id = self.journal, 'tun', 'plain'
+        self.journal.value = dict(new_tun(), kind='tun', lease_id='plain')
+        with patch('yukiwire.network.journal_lock', return_value=nullcontext()), \
+             patch('yukiwire.network.WinInetProxy') as proxy:
+            guard.apply_proxy()
+        proxy.assert_not_called()
 
     def recover_guarded(self, **kwargs):
         with patch('yukiwire.network.journal_lock', return_value=nullcontext()), \

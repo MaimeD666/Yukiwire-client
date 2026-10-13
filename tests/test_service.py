@@ -162,6 +162,45 @@ class ServiceTests(unittest.TestCase):
                     finally:
                         session.stop()
 
+    def test_combined_capture_arms_both_paths_before_core_and_applies_proxy_after_readiness(self):
+        from yukiwire.routing import DEFAULTS
+        session = Session()
+        session.guard = Mock(kind='tun')
+        session.guard.recover.return_value = {'restored': True}
+        core = Mock()
+        core.process.pid = 321
+        core.process.poll.return_value = None
+        core.close.side_effect = lambda: setattr(core.process.poll, 'return_value', 0)
+        def start_core(path, config, before_resume):
+            self.assertTrue(any(i['protocol'] == 'tun' for i in config['inbounds']))
+            before_resume(321)
+            session.guard.apply_proxy.assert_not_called()
+            return core
+        def verified(**kwargs):
+            self.assertTrue(session.guard.arm.call_args.kwargs['system_proxy'])
+            session.guard.apply_proxy.assert_not_called()
+        with patch('yukiwire.backend.ctypes.windll.shell32.IsUserAnAdmin', return_value=1), \
+             patch('yukiwire.backend.tun_preflight'), \
+             patch('yukiwire.backend.tun_ready', return_value=True) as ready, \
+             patch('yukiwire.backend.conflicts', return_value={'other_proxy': False, 'other_vpn': False}), \
+             patch('yukiwire.backend.RuleSets') as rules, \
+             patch('yukiwire.backend.validate_config'), \
+             patch('yukiwire.backend.socket.socket') as socket, \
+             patch('yukiwire.backend.CoreProcess', side_effect=start_core), \
+             patch('yukiwire.backend.probe_https', side_effect=verified) as probe:
+            rules.return_value.tags.return_value = {}
+            socket.return_value.__enter__.return_value.connect_ex.return_value = 0
+            profile = 'vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls'
+            try:
+                session.start(profile, dict(DEFAULTS, preset='all', capture='tun', tun_system_proxy=True))
+                session.guard.arm.assert_called_once()
+                self.assertEqual(session.guard.arm.call_args.args[:2], ('tun', 321))
+                ready.assert_called_once()
+                probe.assert_called_once_with(port=11812)
+                session.guard.apply_proxy.assert_called_once()
+            finally:
+                session.stop()
+
     def test_unconfirmed_core_stop_retains_recovery_and_does_not_report_stopped(self):
         emit = Mock()
         service = ApplicationService(emit)
@@ -201,7 +240,10 @@ class ServiceTests(unittest.TestCase):
         with patch('yukiwire.backend.conflicts', return_value={}), patch('yukiwire.backend.RuleSets') as rules:
             rules.return_value.metadata.return_value = {}
             service._command({'action': 'get_state'})
-        self.assertEqual(events[0]['settings']['preset'], 'all')
+        self.assertEqual(events[0]['settings']['preset'], 'ru-direct')
+        self.assertTrue(events[0]['settings_pending'])
+        self.assertEqual(events[1]['active_settings']['preset'], 'all')
+        self.assertTrue(events[1]['settings_pending'])
         self.assertEqual(events[1]['pid'], 123)
         self.assertEqual(events[1]['transient']['protocol'], 'vless')
         self.assertEqual(events[2]['event'], 'probe_result')
@@ -234,11 +276,13 @@ class ServiceTests(unittest.TestCase):
         service = ApplicationService(lambda event, **values: events.append(event))
         service.session.core = Mock()
         service.stop_requested.clear()
-        def check():
+        def check(capture):
+            self.assertEqual(capture, 'tun')
             entered.set()
             release.wait(2)
             return {'results': [{'target': 'chatgpt.com', 'accessible': True, 'message': 'HTTP 200'}], 'exit': {}}
         with patch('yukiwire.backend.check_connection', check):
+            service.session.settings['capture'] = 'tun'
             service._command({'action': 'check_sites'})
             self.assertTrue(entered.wait(2))
             service.session.generation += 1
@@ -313,6 +357,21 @@ class ServiceTests(unittest.TestCase):
             proxy.return_value.read.return_value = {'flags': 3}
             service._check_capture(5)
         self.assertEqual(service.commands.get_nowait(), {'action': '_capture_conflict', 'generation': 5})
+
+    def test_combined_capture_detects_disabled_proxy_without_reapplying_it(self):
+        service = ApplicationService(Mock())
+        service.stop_requested.clear()
+        service.session.settings.update(capture='tun', tun_system_proxy=True)
+        service.session.guard = Mock(lease_id='test')
+        service.session.guard.journal.read.return_value = {'desired': {'flags': 3}, 'lease_id': 'test'}
+        with patch('yukiwire.backend.conflicts', return_value={'other_proxy': False, 'other_vpn': False}), \
+             patch('yukiwire.backend.WinInetProxy') as proxy, \
+             patch('yukiwire.backend.tun_ready') as tun:
+            proxy.return_value.read.return_value = {'flags': 1}
+            service._check_capture(5)
+        self.assertEqual(service.commands.get_nowait(), {'action': '_capture_conflict', 'generation': 5})
+        proxy.return_value.write.assert_not_called()
+        tun.assert_not_called()
 
     def test_missing_tun_route_schedules_guarded_reconnect(self):
         service = ApplicationService(Mock())

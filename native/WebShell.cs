@@ -34,6 +34,7 @@ namespace Yukiwire {
   StreamWriter workerInput;
   object workerPending;
   bool switchingBackend, integrationWorker;
+  bool connectionCancelled;
   bool integrationCrash;
   bool integrationRenderer, integrationBrowser, rendererRecovered;
   int originalCorePid;
@@ -194,6 +195,14 @@ namespace Yukiwire {
     if (action == "window_minimize") { WindowState = WindowState.Minimized; return; }
     if (action == "window_maximize") { WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized; return; }
     if (action == "window_drag") { ReleaseCapture(); SendMessage(new WindowInteropHelper(this).Handle,0xA1,new IntPtr(2),IntPtr.Zero); return; }
+    if (action == "choose_game") {
+     var dialog = new OpenFileDialog { Title = "Выберите .exe игры", Filter = "Приложения (*.exe)|*.exe", CheckFileExists = true };
+     if (dialog.ShowDialog(this) == true) {
+      if (!String.Equals(Path.GetExtension(dialog.FileName), ".exe", StringComparison.OrdinalIgnoreCase))
+       throw new InvalidOperationException("Выберите исполняемый файл игры (.exe).");
+      Post(new { @event = "game_selected", path = dialog.FileName.Replace('\\', '/') });
+     } return;
+    }
     if (action == "import_file") {
      var dialog = new OpenFileDialog { Filter = "Профили (*.json;*.txt)|*.json;*.txt", CheckFileExists = true };
      if (dialog.ShowDialog(this) == true) {
@@ -203,6 +212,8 @@ namespace Yukiwire {
      } return;
     }
     if (!actions.Contains(action)) return;
+    if (action == "stop") connectionCancelled = true;
+    if (action == "start") connectionCancelled = false;
     if (testProfile != null && action == "start") {
      if (testProfile != "__SAVED_PROFILE__") message = new Dictionary<string,object> { {"action","start"}, {"profile",testProfile} };
      message["settings"] = new Dictionary<string,object> { {"capture","local"}, {"preset","all"} };
@@ -294,6 +305,10 @@ namespace Yukiwire {
       try {
        var message = json.Deserialize<Dictionary<string,object>>(e.Data);
        if (Convert.ToString(message["event"]) == "browser_requested") { await OpenProxyBrowser(); return; }
+       if (Convert.ToString(message["event"]) == "settings_elevation_required") {
+        if (connectionCancelled) return;
+        await StartNetworkWorker(message["request"],true); return;
+       }
        if (Convert.ToString(message["event"]) == "recovery_elevation_required") {
         await StartNetworkWorker(new { action = "recover_network" },true); return;
        }
@@ -343,6 +358,10 @@ namespace Yukiwire {
         try {
          var data = json.Deserialize<Dictionary<string,object>>(captured);
          if (Convert.ToString(data["event"]) == "browser_requested") { await OpenProxyBrowser(); return; }
+         if (Convert.ToString(data["event"]) == "settings_elevation_required") {
+          if (connectionCancelled) return;
+          await StartNetworkWorker(data["request"],true); return;
+         }
          PostJson(captured);
          if (Convert.ToString(data["event"]) == "ready" && workerPending != null) { var pending = workerPending; workerPending = null; Send(pending); }
          if (testProfile != null) Integration(data);

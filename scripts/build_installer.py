@@ -11,7 +11,7 @@ import zipfile
 from download_installer_tools import install
 
 ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE = ROOT / 'dist/Yukiwire-0.4-preview-win-x64.zip'
+ARCHIVE = ROOT / 'dist/Yukiwire-0.4-win-x64.zip'
 
 
 def payload(archive_path):
@@ -55,7 +55,7 @@ def build(archive_path=ARCHIVE, test=False):
     files, metadata = payload(archive_path)
     compiler, bootstrapper = install()
     version = metadata['version']
-    name = f'Yukiwire-{version}-preview-win-x64-setup'
+    name = f'Yukiwire-{version}-win-x64-setup'
     output = ROOT / ('build/installer-tests' if test else 'dist')
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='installer-payload-', dir=ROOT / 'build') as temporary:
@@ -72,7 +72,7 @@ def build(archive_path=ARCHIVE, test=False):
         include = staged / 'payload.iss'
         include.write_text('\n'.join(lines), encoding='utf-8-sig')
         version_info = '.'.join((version.split('.') + ['0'] * 4)[:4])
-        command = [str(compiler), '/Qp', '/DPayloadInclude=' + str(include), '/DAppVersion=' + version + ' preview',
+        command = [str(compiler), '/Qp', '/DPayloadInclude=' + str(include), '/DAppVersion=' + version,
                    '/DVersionInfoVersion=' + version_info, '/DAppIcon=' + str(staged / 'ui/assets/yukiwire.ico'),
                    '/DBootstrapper=' + str(bootstrapper), '/DOutputDir=' + str(output), '/DOutputName=' + name]
         if test:

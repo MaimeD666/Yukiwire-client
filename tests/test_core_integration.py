@@ -117,6 +117,15 @@ class CoreIntegrationTests(unittest.TestCase):
         config = add_tun(enable_metrics(apply_routing(config, DEFAULTS)), new_tun())
         validate_config(config)
 
+    def test_game_tun_config_validates_and_keeps_dns_via_vpn(self):
+        _, config = build_config('vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls')
+        config = add_tun(enable_metrics(apply_routing(config, dict(DEFAULTS, game_mode=True,
+                         game_processes='dota2.exe\ncs2.exe\nC:/Games/My Game/Game.exe'))), new_tun())
+        self.assertEqual(config['routing']['rules'][0]['inboundTag'], ['yukiwire-dns'])
+        self.assertEqual(config['routing']['rules'][0]['outboundTag'], 'proxy')
+        self.assertEqual(config['routing']['rules'][1]['port'], '53')
+        validate_config(config)
+
     def test_local_route_and_actual_traffic_counters(self):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):

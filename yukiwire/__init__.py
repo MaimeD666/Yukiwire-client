@@ -1,1 +1,1 @@
-"""Yukiwire technical preview."""
+"""Yukiwire VPN client."""

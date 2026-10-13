@@ -1,11 +1,13 @@
 """Deterministic first-match routing, shared by Xray config and UI explanation."""
 import copy
 import ipaddress
+import ntpath
 import re
 from urllib.parse import urlsplit
 
 PRIVATE = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', '169.254.0.0/16', '::1/128', 'fc00::/7', 'fe80::/10']
-DEFAULTS = {'preset': 'ru-direct', 'direct': '', 'proxy': '', 'block': '', 'ru_ip': False, 'dns': 'system', 'auto_reconnect': True, 'capture': 'local'}
+DEFAULTS = {'preset': 'ru-direct', 'direct': '', 'proxy': '', 'block': '', 'ru_ip': False, 'dns': 'system', 'auto_reconnect': True, 'capture': 'local',
+            'game_mode': False, 'game_processes': 'dota2.exe', 'tun_system_proxy': False, 'reconnect_on_change': False}
 PRESETS = {'all', 'ru-direct', 'selected', 'original'}
 
 
@@ -40,6 +42,33 @@ def parse_rules(text):
     return list(dict.fromkeys(domains)), list(dict.fromkeys(addresses))
 
 
+def parse_game_processes(text):
+    """Accept exact Windows executable names/paths, never folder-wide matches."""
+    if not isinstance(text, str) or len(text) > 16384:
+        raise ValueError('Слишком большой список игр.')
+    processes = []
+    for value in text.splitlines():
+        value = value.strip()
+        if not value:
+            continue
+        if value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        value = value.replace('\\', '/')
+        drive, tail = ntpath.splitdrive(value)
+        if (len(value) > 1024 or any(ord(c) < 32 or c in '<>"|?*' for c in value)
+                or ':' in tail or not value.lower().endswith('.exe') or ntpath.basename(value).lower() == '.exe'
+                or ('/' in value and not (drive and tail.startswith('/')))
+                or (drive and not tail.startswith('/'))
+                or (drive and not (re.fullmatch(r'[A-Za-z]:', drive) or drive.startswith('//')))
+                or any(part in ('.', '..') for part in value.split('/'))):
+            raise ValueError('Укажите имя игры с .exe или полный путь к её .exe, по одному в строке. Сохраните регистр букв.')
+        if value not in processes:
+            processes.append(value)
+        if len(processes) > 100:
+            raise ValueError('Можно выбрать не больше 100 процессов игр.')
+    return processes
+
+
 def normalize_settings(settings):
     result = dict(DEFAULTS)
     result.update({k: v for k, v in settings.items() if k in DEFAULTS})
@@ -49,15 +78,39 @@ def normalize_settings(settings):
         if not isinstance(result[key], str) or len(result[key]) > 65536:
             raise ValueError('Слишком много правил.')
         parse_rules(result[key])
-    for key in ('ru_ip', 'auto_reconnect'):
+    for key in ('ru_ip', 'auto_reconnect', 'game_mode', 'tun_system_proxy', 'reconnect_on_change'):
         if type(result[key]) is not bool:
             raise ValueError('Некорректное значение переключателя.')
+    processes = parse_game_processes(result['game_processes'])
+    result['game_processes'] = '\n'.join(processes)
+    if result['game_mode'] and not processes:
+        raise ValueError('Выберите хотя бы одну игру или отключите игровой режим.')
+    return result
+
+
+def connection_settings(settings):
+    """Only values that affect traffic; UI and recovery preferences apply immediately."""
+    result = normalize_settings(settings)
+    for key in ('auto_reconnect', 'reconnect_on_change'):
+        result.pop(key)
+    if result['preset'] != 'ru-direct':
+        result['ru_ip'] = False
+    if result['preset'] == 'original':
+        result.update(direct='', proxy='', block='', game_mode=False)
+    if not result['game_mode']:
+        result['game_processes'] = ''
+    if result['capture'] != 'tun':
+        result['tun_system_proxy'] = False
     return result
 
 
 def build_rules(settings, tags, proxy_tag, direct_tag, block_tag):
     rules = []
     for setting, target in [('block', block_tag), ('proxy', proxy_tag), ('direct', direct_tag)]:
+        if setting == 'proxy' and settings.get('game_mode'):
+            rules.append({'type': 'field', 'process': parse_game_processes(settings['game_processes']),
+                          'inboundTag': ['local-socks', 'local-http', 'yukiwire-tun'],
+                          'outboundTag': direct_tag})
         domains, addresses = parse_rules(settings[setting])
         if domains:
             rules.append({'type': 'field', 'domain': ['domain:' + d for d in domains], 'outboundTag': target})
@@ -110,7 +163,7 @@ def apply_routing(config, settings, tags=None):
             if name in used:
                 raise ValueError('JSON использует зарезервированный тег ' + name)
         outbounds.extend([{'tag': 'yukiwire-direct', 'protocol': 'freedom', 'settings': {}}, {'tag': 'yukiwire-block', 'protocol': 'blackhole', 'settings': {}}])
-        config['routing'] = {'domainStrategy': 'IPIfNonMatch' if settings['ru_ip'] else 'AsIs',
+        config['routing'] = {'domainStrategy': 'IPIfNonMatch' if settings['preset'] == 'ru-direct' and settings['ru_ip'] else 'AsIs',
                              'rules': build_rules(settings, tags, proxy_tag, 'yukiwire-direct', 'yukiwire-block')}
     if settings['dns'] == 'doh':
         config['dns'] = {'servers': ['https://1.1.1.1/dns-query'], 'queryStrategy': 'UseIP', 'tag': 'yukiwire-dns'}
@@ -124,8 +177,20 @@ def apply_routing(config, settings, tags=None):
     return config
 
 
-def explain(value, settings, matcher=None):
+def explain(value, settings, matcher=None, process=''):
     settings = normalize_settings(settings)
+    processes = parse_game_processes(process)
+    if len(processes) > 1:
+        raise ValueError('Укажите один процесс игры.')
+    process = processes[0] if processes else ''
+    result = _explain(value, settings, matcher, process)
+    if settings['game_mode'] and settings['preset'] != 'original' and not process and result['route'] != 'Блокировать':
+        result['reason'] += ' Для выбранной игры действует прямой маршрут; укажите её процесс для проверки.'
+        result['definitive'] = False
+    return result
+
+
+def _explain(value, settings, matcher, process):
     value = value.strip()
     if not value:
         raise ValueError('Введите домен или IP.')
@@ -143,6 +208,10 @@ def explain(value, settings, matcher=None):
     if settings['preset'] == 'original':
         return {'route': 'По JSON', 'reason': 'Исходные правила профиля', 'definitive': False}
     for key, target in [('block', 'Блокировать'), ('proxy', 'Через VPN'), ('direct', 'Напрямую')]:
+        if key == 'proxy' and settings['game_mode'] and process:
+            games = parse_game_processes(settings['game_processes'])
+            if any(process == game or ('/' not in game and ntpath.basename(process) == game) for game in games):
+                return {'route': 'Напрямую', 'reason': 'Игровой режим: выбранный процесс игры', 'definitive': True}
         domains, addresses = parse_rules(settings[key])
         if host and any(host == domain or host.endswith('.' + domain) for domain in domains):
             return {'route': target, 'reason': 'Ваше правило: ' + key, 'definitive': True}

@@ -17,7 +17,7 @@ from .health import probe_https, check_connection, diagnostic_config
 from .network import NetworkGuard, WinInetProxy, add_tun, conflicts, new_tun, recover_stale, tun_preflight, tun_ready
 from .paths import ROOT, STATE, CORE, RUNTIME
 from .process import CoreProcess
-from .routing import DEFAULTS, apply_routing, explain, normalize_settings
+from .routing import DEFAULTS, apply_routing, connection_settings, explain, normalize_settings
 from .storage import ProfileStore, SecureFile, atomic_write
 from .telemetry import Telemetry, enable_metrics
 from .analytics import Analytics
@@ -94,7 +94,8 @@ class Session:
                     def before_resume(pid):
                         if cancel and cancel.is_set():
                             raise ValueError('Подключение отменено.')
-                        self.guard.arm(self.settings['capture'], pid, identity)
+                        self.guard.arm(self.settings['capture'], pid, identity,
+                                       system_proxy=self.settings['capture'] == 'tun' and self.settings['tun_system_proxy'])
                         if cancel and cancel.is_set():
                             raise ValueError('Подключение отменено.')
                         collision = conflicts()
@@ -318,7 +319,7 @@ class ApplicationService:
                 return
             self._analytics('begin', result['capture'], settings['preset'])
             self.log('Ядро запущено; ожидается проверка HTTPS.')
-            self.emit('started', pid=result['pid'], capture=result['capture'], reconnected=False)
+            self._started(result, reconnected=False)
             self._probe(manual=False)
             self._command({'action': 'check_sites'})
         elif action == 'stop':
@@ -357,8 +358,8 @@ class ApplicationService:
         elif action == 'get_analytics':
             self._analytics('overview')
         elif action == 'get_state':
-            settings = self.session.settings if self.session.core else self.settings
-            self.emit('ready', settings=settings, **self.profiles.public(), environment=self._refresh_environment(publish=False),
+            self.emit('ready', settings=self.settings, settings_pending=self._settings_pending(),
+                      **self.profiles.public(), environment=self._refresh_environment(publish=False),
                       rules=RuleSets().metadata(), warning=None)
             self._analytics('overview')
             core = self.session.core
@@ -369,7 +370,8 @@ class ApplicationService:
                     raw = self.last_profile or ''
                     transient = {'name': 'Временный профиль', 'protocol': 'JSON Xray' if raw.lstrip().startswith('{') else raw.split('://')[0]}
                 self.emit('started', pid=core.process.pid, capture=self.session.settings['capture'],
-                          reconnected=True, transient=transient)
+                          reconnected=True, transient=transient, active_settings=self.session.settings,
+                          settings_pending=self._settings_pending())
                 if self.healthy and self.last_probe_result and self.last_probe_generation == self.session.generation:
                     self.emit('probe_result', **self.last_probe_result)
                 if self.site_results and self.site_results['generation'] == self.session.generation:
@@ -387,10 +389,11 @@ class ApplicationService:
             if not self.sites_lock.acquire(blocking=False):
                 return
             generation = self.session.generation
+            capture = self.session.settings['capture']
             self.emit('sites_checking')
             def check():
                 try:
-                    report = check_connection()
+                    report = check_connection(capture=capture)
                     results = report['results']
                     if generation == self.session.generation and not self.stop_requested.is_set():
                         self.site_results = {'time': int(time.time()), 'generation': generation, **report}
@@ -427,7 +430,7 @@ class ApplicationService:
                         if self.stop_requested.is_set():
                             self.session.stop()
                             break
-                        self.emit('started', pid=result['pid'], capture=result['capture'], reconnected=True)
+                        self._started(result, reconnected=True)
                         self.log('Ядро перезапущено. Проверяем связь.')
                         self._probe(manual=False)
                         break
@@ -464,15 +467,31 @@ class ApplicationService:
                 raise ValueError('Отключитесь перед редактированием профиля.')
             self.emit('profile_detail', **self.profiles.get(request.get('profile_id')))
         elif action == 'save_settings':
-            if self.session.core:
-                raise ValueError('Отключитесь перед сохранением маршрутизации. Работающее подключение не будет изменено.')
             settings = normalize_settings(request.get('settings', {}))
+            apply_now = bool(self.session.core and settings['reconnect_on_change'] and
+                             connection_settings(settings) != connection_settings(self.session.settings))
+            if apply_now:
+                # Reject invalid routing before saving or interrupting a working connection.
+                _, config = build_config(self.last_profile)
+                config = diagnostic_config(enable_metrics(apply_routing(config, settings, RuleSets().tags())))
+                if settings['capture'] == 'tun':
+                    if settings['preset'] == 'original':
+                        raise ValueError('Для TUN выберите маршрут Yukiwire, а не правила из JSON.')
+                    config = add_tun(config, new_tun())
+                validate_config(config)
             self.settings_file.write(settings)
             self.settings = settings
-            self.emit('settings', settings=settings)
-            self.log('Настройки сохранены. Они применятся при следующем подключении.')
+            # Recovery preferences do not require a new core, even with auto-apply disabled.
+            for key in ('auto_reconnect', 'reconnect_on_change'):
+                self.session.settings[key] = settings[key]
+            self.emit('settings', settings=settings, settings_pending=self._settings_pending(), applying=apply_now)
+            if apply_now:
+                self._apply_settings()
+            else:
+                self.log('Настройки сохранены.' + (' Применятся при следующем подключении.' if self._settings_pending() else ''))
         elif action == 'explain':
-            self.emit('route_explanation', **explain(request.get('target', ''), request.get('settings', self.settings), RuleSets().membership))
+            self.emit('route_explanation', **explain(request.get('target', ''), request.get('settings', self.settings),
+                                                   RuleSets().membership, request.get('process', '')))
         elif action in ('update_rules', 'rollback_rules'):
             if self.session.core:
                 raise ValueError('Отключитесь перед заменой списков. Текущее подключение сохранено.')
@@ -555,11 +574,74 @@ class ApplicationService:
                     self._probe(manual=False)
         threading.Thread(target=check, daemon=True).start()
 
+    def _settings_pending(self):
+        return bool(self.session.core and connection_settings(self.settings) != connection_settings(self.session.settings))
+
+    def _started(self, result, reconnected):
+        self.emit('started', pid=result['pid'], capture=result['capture'], reconnected=reconnected,
+                  active_settings=self.session.settings, settings_pending=self._settings_pending())
+
+    def _apply_settings(self):
+        """One controlled restart; retain the saved draft and restore the old session on failure."""
+        if self.stop_requested.is_set() or self.closing.is_set():
+            return
+        previous = dict(self.session.settings)
+        handoff = False
+        self.restarting = True
+        self.healthy = False
+        self.site_results = self.last_probe_result = self.last_probe_generation = None
+        self.failed_checks = 0
+        self.emit('reconnecting', reason='settings')
+        try:
+            # Never launch another core unless ownership and network cleanup succeeded.
+            self.session.stop()
+            if self.stop_requested.is_set() or self.closing.is_set():
+                return
+            if self.settings['capture'] == 'tun' and not ctypes.windll.shell32.IsUserAnAdmin():
+                # Host consumes this private handoff; it must never reach WebView.
+                handoff = True
+                self.emit('settings_elevation_required', request=dict(action='start', profile=None if self.active_profile_id else self.last_profile,
+                          profile_id=self.active_profile_id, settings=self.settings))
+                return
+            try:
+                result = self.session.start(self.last_profile, self.settings, self.stop_requested)
+            except NetworkConflict:
+                raise  # A foreign VPN is not permission to retake the network.
+            except Exception as exc:
+                if self.stop_requested.is_set() or self.closing.is_set():
+                    return
+                if self.session.core or self.session.guard.kind:
+                    raise  # Failed cleanup: retain recovery ownership, do not start again.
+                try:
+                    result = self.session.start(self.last_profile, previous, self.stop_requested)
+                except Exception:
+                    raise ValueError('Настройки сохранены, но переподключение не удалось. Подключитесь повторно.') from None
+                if not self.stop_requested.is_set():
+                    self._started(result, reconnected=True)
+                    self._probe(manual=False)
+                    raise ValueError('Настройки сохранены, но не применены. Восстановлено предыдущее подключение.') from exc
+                return
+            if self.stop_requested.is_set() or self.closing.is_set():
+                return
+            self.session.reconnect_count += 1
+            self._started(result, reconnected=True)
+            self.log('Изменения применены. VPN переподключён.')
+            self._probe(manual=False)
+            self._command({'action': 'check_sites'})
+        finally:
+            self.restarting = False
+            if self.stop_requested.is_set() or self.closing.is_set():
+                self.session.stop()
+            if not self.session.core and not handoff:
+                self.healthy = False
+                self.emit('stopped')
+                self._analytics('finish', self._session_totals())
+
     def _monitor(self):
         while not self.closing.wait(2):
             core = self.session.core
             generation = self.session.generation
-            if not core:
+            if not core or self.restarting:
                 continue
             if core.process.poll() is not None:
                 self.healthy = False
@@ -602,7 +684,7 @@ class ApplicationService:
         if mode == 'local' or self.stop_requested.is_set():
             return
         collision = conflicts()
-        if mode == 'system':
+        if mode == 'system' or (mode == 'tun' and self.session.settings['tun_system_proxy']):
             record = self.session.guard.journal.read()
             collision['other_proxy'] = (collision['other_proxy'] or not record or
                                         record.get('lease_id') != self.session.guard.lease_id or

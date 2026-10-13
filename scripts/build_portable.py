@@ -93,7 +93,7 @@ def write_archive(path, allowed, metadata):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--without-tun', action='store_true', help='Build local/system proxy preview without Wintun')
+    parser.add_argument('--without-tun', action='store_true', help='Build local/system proxy package without Wintun')
     parser.add_argument('--installed-python', action='store_true', help='Developer fallback: bundle the build interpreter')
     args = parser.parse_args()
     if os.name != 'nt' or struct.calcsize('P') != 8 or sys.version_info < (3, 11):
@@ -110,7 +110,7 @@ def main():
     dist = ROOT / 'dist'
     dist.mkdir(exist_ok=True)
     suffix = '-local' if args.without_tun else ''
-    archive_path = dist / ('Yukiwire-0.4-preview-win-x64' + suffix + '.zip')
+    archive_path = dist / ('Yukiwire-0.4-win-x64' + suffix + '.zip')
     with tempfile.TemporaryDirectory(prefix='portable-', dir=ROOT / 'build') as temporary:
         generated = Path(temporary)
         allowed = {'Yukiwire.exe': shell, 'README.md': ROOT / 'README.md',

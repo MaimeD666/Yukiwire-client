@@ -169,7 +169,7 @@ def exercise(profile, capture, before):
         identity = process_identity(started['pid'])
         if capture == 'tun':
             with ThreadPoolExecutor(max_workers=2) as pool:
-                sites = pool.submit(check_connection)
+                sites = pool.submit(check_connection, capture=capture)
                 socket_check = pool.submit(tun_transport)
                 checks['sites'] = sites.result()
                 checks['tun_socket'] = socket_check.result()

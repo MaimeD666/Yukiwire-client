@@ -1,10 +1,58 @@
 import unittest
+import ssl
 from unittest.mock import patch
 
 from yukiwire.health import probe_https, check_sites, trace_country, diagnostic_config
 
 
 class HealthTests(unittest.TestCase):
+    def test_tun_probe_uses_os_route_without_an_explicit_proxy(self):
+        with patch('yukiwire.health.http.client.HTTPSConnection') as factory:
+            factory.return_value.getresponse.return_value.status = 200
+            result = probe_https(port=None, host='www.youtube.com')
+            self.assertEqual(factory.call_args.args, ('www.youtube.com', 443))
+            factory.return_value.set_tunnel.assert_not_called()
+            self.assertEqual(result['path'], 'tun')
+            self.assertIsNone(result['proxy_port'])
+            factory.return_value.close.assert_called_once()
+
+    def test_tun_failure_is_not_hidden_by_working_vpn_proxy(self):
+        error = ssl.SSLError('TLS failure')
+        error.reason = 'DECRYPTION_FAILED_OR_BAD_RECORD_MAC'
+        with patch('yukiwire.health.SITES', ('www.youtube.com',)), \
+             patch('yukiwire.health.probe_https', side_effect=[error, {'http_status': 200}]) as probe:
+            result = check_sites(capture='tun')[0]
+        self.assertFalse(result['accessible'])
+        self.assertFalse(result['transport_ok'])
+        self.assertTrue(result['vpn_transport_ok'])
+        self.assertEqual(result['tls_error'], 'bad_record_mac')
+        self.assertEqual(result['vpn_http_status'], 200)
+        self.assertEqual([call.kwargs['port'] for call in probe.call_args_list], [None, 11812])
+
+    def test_tun_and_vpn_failure_does_not_claim_local_conflict(self):
+        with patch('yukiwire.health.SITES', ('www.youtube.com',)), \
+             patch('yukiwire.health.probe_https', side_effect=TimeoutError):
+            result = check_sites(capture='tun')[0]
+        self.assertFalse(result['vpn_transport_ok'])
+        self.assertNotIn('zapret', result['message'])
+
+    def test_tun_http_denial_is_not_retried_or_called_a_tls_failure(self):
+        with patch('yukiwire.health.SITES', ('www.youtube.com',)), \
+             patch('yukiwire.health.probe_https', return_value={'target': 'www.youtube.com', 'http_status': 403}) as probe:
+            result = check_sites(capture='tun')[0]
+        self.assertTrue(result['transport_ok'])
+        self.assertFalse(result['accessible'])
+        probe.assert_called_once_with(port=None, host='www.youtube.com', timeout=10)
+        self.assertNotIn('vpn_transport_ok', result)
+
+    def test_system_and_local_checks_still_use_the_routed_proxy(self):
+        for capture in ('local', 'system'):
+            with self.subTest(capture=capture), patch('yukiwire.health.SITES', ('www.youtube.com',)), \
+                 patch('yukiwire.health.probe_https', side_effect=TimeoutError) as probe:
+                result = check_sites(port=12345, capture=capture)[0]
+                probe.assert_called_once_with(port=12345, host='www.youtube.com', timeout=10)
+                self.assertNotIn('vpn_transport_ok', result)
+
     def test_exit_country_uses_client_location_not_datacenter_and_discards_ip(self):
         self.assertEqual(trace_country(b'ip=192.0.2.42\nloc=DE\ncolo=SJC\n'), 'DE')
         with self.assertRaises(ValueError):

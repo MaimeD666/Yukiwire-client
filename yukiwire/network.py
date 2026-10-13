@@ -146,12 +146,14 @@ class ProxyLease:
         self.journal = journal
         self.adapter = adapter or WinInetProxy()
 
-    def prepare(self, owner, core):
+    def prepare(self, owner, core, tun=None):
         original = self.adapter.read()
         if original['flags'] & 2 and original['server'] or original['flags'] & 4 and original['pac']:
             raise ValueError('Уже включён другой системный прокси/PAC. Yukiwire не будет заменять его. Выберите локальный режим.')
         desired = {'flags': 1 | 2, 'server': '127.0.0.1:11809', 'bypass': '<local>;localhost;127.*;[::1]', 'pac': ''}
         record = {'version': 1, 'lease_id': uuid.uuid4().hex, 'kind': 'proxy', 'owner': owner, 'core': core, 'original': original, 'desired': desired, 'phase': 'prepared'}
+        if tun is not None:
+            record.update(tun, kind='tun', system_proxy=True)
         self.journal.write(record)  # Durable record before any OS mutation.
         return record
 
@@ -163,7 +165,7 @@ class ProxyLease:
         record['phase'] = 'applied'
         self.journal.write(record)
 
-    def recover(self):
+    def recover(self, remove_journal=True):
         record = self.journal.read()
         if record is None:
             return {'restored': True, 'conflict': False}
@@ -175,7 +177,8 @@ class ProxyLease:
         elif current != record['original']:
             # Preserve a newer user/other-client change. The journal remains for review.
             return {'restored': False, 'conflict': True}
-        self.journal.path.unlink(missing_ok=True)
+        if remove_journal:
+            self.journal.path.unlink(missing_ok=True)
         return {'restored': True, 'conflict': False}
 
 
@@ -186,17 +189,20 @@ class NetworkGuard:
         self.kind = None
         self.lease_id = None
 
-    def arm(self, kind, pid, tun=None):
+    def arm(self, kind, pid, tun=None, system_proxy=False):
         with journal_lock(self.journal.path):
-            self._arm(kind, pid, tun)
+            self._arm(kind, pid, tun, system_proxy)
 
-    def _arm(self, kind, pid, tun=None):
+    def _arm(self, kind, pid, tun=None, system_proxy=False):
         if self.journal.path.exists():
             raise ValueError('Есть незавершённое восстановление сети. Откройте настройки безопасности.')
         if kind == 'system':
             record = ProxyLease(self.journal).prepare(os.getpid(), pid)
         elif kind == 'tun':
-            record = {'version': 1, 'lease_id': uuid.uuid4().hex, 'kind': 'tun', 'owner': os.getpid(), 'core': pid, **tun}
+            if system_proxy:
+                record = ProxyLease(self.journal).prepare(os.getpid(), pid, tun=tun)
+            else:
+                record = {'version': 1, 'lease_id': uuid.uuid4().hex, 'kind': 'tun', 'owner': os.getpid(), 'core': pid, **tun}
         else:
             return
         self.kind = kind
@@ -220,11 +226,13 @@ class NetworkGuard:
             raise RuntimeError('Защита восстановления сети не запустилась. Настройки не будут применены.')
 
     def apply_proxy(self):
-        if self.kind == 'system':
+        if self.kind in ('system', 'tun'):
             with journal_lock(self.journal.path):
                 record = self.journal.read()
                 if not record or record.get('lease_id') != self.lease_id:
                     raise ValueError('Подключение уже завершено. Прокси Windows не будет изменён.')
+                if self.kind == 'tun' and not record.get('system_proxy'):
+                    return
                 if process_identity(record['core']) != record['core_start']:
                     raise ValueError('Ядро уже завершено. Прокси Windows не будет изменён.')
                 ProxyLease(self.journal).apply()
@@ -300,12 +308,17 @@ def _recover_journal(journal):
         import re
         if not re.fullmatch(r'Yukiwire-[0-9a-f]{12}', record.get('adapter', '')):
             raise ValueError('Неверная идентичность TUN в журнале.')
+        # Keep one durable lease until both capture paths have been recovered.
+        # A newer proxy setting must survive, while our own TUN is still cleaned up.
+        proxy_result = ProxyLease(journal).recover(remove_journal=False) if record.get('system_proxy') else None
         script = RUNTIME / 'helpers' / 'recover-tun.ps1' if PORTABLE else ROOT / 'scripts' / 'recover-tun.ps1'
         result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(script),
                                  '-AdapterName', record['adapter'], '-Description', record['description']],
                                 capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
         if result.returncode != 0:
             raise RuntimeError('Не удалось убрать собственные маршруты TUN. Журнал сохранён для повторного восстановления.')
+        if proxy_result and not proxy_result['restored']:
+            return proxy_result
         journal.path.unlink(missing_ok=True)
         return {'restored': True, 'conflict': False}
     raise ValueError('Неизвестный тип журнала сети.')

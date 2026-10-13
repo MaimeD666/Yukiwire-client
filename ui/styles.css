@@ -230,9 +230,21 @@ body[data-connection="unverified"] .connection-summary h2::before, body[data-con
 .preset-option input { position: absolute; opacity: 0; width: 18px; height: 18px; right: 12px; top: 12px; }
 .preset-option strong { display: block; font-size: 12px; line-height: 20px; font-weight: 600; }
 .preset-option small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 18px; }
-.preset-option i { position: absolute; top: 16px; right: 14px; width: 12px; height: 12px; border: 1px solid var(--border-strong); }
+.preset-option i { position: absolute; top: 16px; right: 14px; width: 12px; height: 12px; border: 1px solid var(--border-strong); pointer-events: none; }
 .preset-option input:checked~i { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--raised); }
 .exceptions-section .section-heading { margin-bottom: 0; }
+.exceptions-section { margin-bottom: 12px; }
+.route-options { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.route-options label { margin: 0 !important; color: var(--muted); }
+.route-options select { width: auto; max-width: 100%; margin: 0; }
+.preset-note { margin: 8px 0 16px; }
+.exception-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.rule-count { font: 11px var(--mono); color: var(--muted); }
+.route-details { color: var(--muted); font-size: 12px; }
+.route-details summary { cursor: pointer; padding: 8px 0; }
+.route-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.route-details>.tools-grid { margin-top: 8px; }
+.priority-details { font-size: 11px; }
 .exception-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .exception-grid label { margin: 8px 0 !important; }
 .field-dot { display: inline-block; width: 4px; height: 4px; margin: 0 6px 2px 0; transform: rotate(45deg); }
@@ -402,6 +414,10 @@ dialog p { font-size: 12px; color: var(--muted); line-height: 1.6; margin: 12px 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+.game-section { margin-bottom: 16px; }
+.game-section>.toggle-row { margin-top: 0; padding-top: 0; border-top: 0; }
+.game-presets { flex-wrap: wrap; margin: 12px 0; }
+.game-presets [aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
 .reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { animation: none !important; transition: none !important; }
 @media (forced-colors: active) {
   .nav-item.selected, .profile-row.selected, .preset-option:has(input:checked) { outline: 2px solid Highlight; }

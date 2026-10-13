@@ -1,4 +1,4 @@
-"""Explicit CONNECT tunnel; independent of Windows proxy and environment vars."""
+"""Check the active capture path and compare TUN failures with the VPN transport."""
 import http.client
 import ssl
 import time
@@ -52,17 +52,19 @@ def check_exit():
         return {'profile': profile.result(), 'chatgpt_route': chatgpt.result()}
 
 
-def check_connection():
+def check_connection(capture='local'):
     with ThreadPoolExecutor(max_workers=2) as executor:
-        sites = executor.submit(check_sites)
+        sites = executor.submit(check_sites, capture=capture)
         country = executor.submit(check_exit)
         return {'results': sites.result(), 'exit': country.result()}
 
 
-def check_sites(port=11809):
+def check_sites(port=11809, capture='local'):
+    # An explicit proxy bypasses the TUN ingress and can hide packet-filter failures.
+    actual_port = None if capture == 'tun' else port
     def check(host):
         try:
-            result = probe_https(port=port, host=host, timeout=10)
+            result = probe_https(port=actual_port, host=host, timeout=10)
             status = result['http_status']
             result['transport_ok'] = True
             result['accessible'] = 200 <= status < 400
@@ -71,22 +73,39 @@ def check_sites(port=11809):
                                  'Ответ сайта: HTTP %s' % status)
             return result
         except Exception as exc:
-            return {'target': host, 'transport_ok': False, 'accessible': False,
-                    'message': 'Нет HTTPS-соединения (%s)' % type(exc).__name__}
+            result = {'target': host, 'transport_ok': False, 'accessible': False,
+                      'error_type': type(exc).__name__, 'path': 'tun' if capture == 'tun' else 'proxy',
+                      'message': 'Нет HTTPS-соединения (%s)' % type(exc).__name__}
+            if isinstance(exc, ssl.SSLError) and getattr(exc, 'reason', None) == 'DECRYPTION_FAILED_OR_BAD_RECORD_MAC':
+                result['tls_error'] = 'bad_record_mac'
+                result['message'] = 'Нарушена целостность TLS. Возможен конфликт сетевого фильтра с TUN.' if capture == 'tun' else 'Нарушена целостность TLS.'
+            if capture == 'tun':
+                try:
+                    comparison = probe_https(port=11812, host=host, timeout=10)
+                    result['vpn_transport_ok'] = True
+                    result['vpn_http_status'] = comparison['http_status']
+                    result['vpn_accessible'] = 200 <= comparison['http_status'] < 400
+                    result['message'] += (' Через VPN сайт отвечает (HTTP %s), через TUN — нет. '
+                                          'Проверьте маршруты и zapret/другие сетевые фильтры.') % comparison['http_status']
+                except Exception:
+                    result['vpn_transport_ok'] = False
+            return result
     with ThreadPoolExecutor(max_workers=3) as executor:
         return list(executor.map(check, SITES))
 
 
 def probe_https(port=11809, host='example.com', path='/', timeout=15):
     started = time.monotonic()
-    connection = http.client.HTTPSConnection('127.0.0.1', port, timeout=timeout,
+    connection = http.client.HTTPSConnection('127.0.0.1' if port is not None else host, port if port is not None else 443, timeout=timeout,
                                              context=ssl.create_default_context())
-    connection.set_tunnel(host, 443)
+    if port is not None:
+        connection.set_tunnel(host, 443)
     try:
         connection.request('GET', path, headers={'Host': host, 'User-Agent': 'Yukiwire/0.4', 'Connection': 'close'})
         response = connection.getresponse()
         response.read(1024)
         return {'http_status': response.status, 'elapsed_ms': round((time.monotonic() - started) * 1000),
-                'tls_verified': True, 'target': host, 'proxy_port': port}
+                'tls_verified': True, 'target': host, 'proxy_port': port,
+                'path': 'tun' if port is None else 'proxy'}
     finally:
         connection.close()

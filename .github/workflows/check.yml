@@ -22,14 +22,14 @@ jobs:
       - run: python -c "import subprocess; subprocess.run(['runtime/Yukiwire.exe', '--smoke-connected'], check=True, timeout=20)"
       - run: python scripts/download_wintun.py
       - run: python scripts/build_portable.py
-      - run: python scripts/verify_portable.py dist/Yukiwire-0.4-preview-win-x64.zip --native
+      - run: python scripts/verify_portable.py dist/Yukiwire-0.4-win-x64.zip --native
       - run: python scripts/build_installer.py
       - run: python scripts/verify_installer.py
       - uses: actions/upload-artifact@v4
         with:
-          name: Yukiwire-0.4-preview-win-x64
+          name: Yukiwire-0.4-win-x64
           if-no-files-found: error
           path: |
-            dist/Yukiwire-0.4-preview-win-x64.zip
-            dist/Yukiwire-0.4-preview-win-x64-setup.exe
+            dist/Yukiwire-0.4-win-x64.zip
+            dist/Yukiwire-0.4-win-x64-setup.exe
             dist/SHA256SUMS.txt
