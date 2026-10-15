@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import threading
+import time
 import uuid
 
 from .paths import STATE
@@ -66,7 +67,10 @@ class SecureFile:
     def read(self, default=None):
         if not self.path.exists():
             return default
-        return json.loads(self.cipher(self.path.read_bytes(), decrypt=True).decode('utf-8'))
+        try:
+            return json.loads(self.cipher(self.path.read_bytes(), decrypt=True).decode('utf-8'))
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise ValueError('Не удалось открыть защищённые данные Windows: файл повреждён или создан на другом ПК/под другой учётной записью. Исходный файл сохранён. Для переноса используйте экспорт профилей на исходном ПК.') from exc
 
     def write(self, value):
         atomic_write(self.path, self.cipher(json.dumps(value, ensure_ascii=False).encode('utf-8')))
@@ -86,7 +90,52 @@ class ProfileStore:
     def public(self):
         with self.lock:
             value = self._read()
-            return {'profiles': [{k: p[k] for k in ('id', 'name', 'protocol')} for p in value['profiles']], 'selected': value['selected']}
+            return {'profiles': [{k: p[k] for k in ('id', 'name', 'protocol')} for p in value['profiles']], 'selected': value['selected'],
+                    'subscriptions': [{key: subscription[key] for key in ('id', 'name', 'updated')}
+                                      for subscription in value.get('subscriptions', [])]}
+
+    def subscription(self, identity):
+        with self.lock:
+            result = next((entry for entry in self._read().get('subscriptions', []) if entry['id'] == identity), None)
+            if result is None:
+                raise ValueError('Подписка не найдена.')
+            return dict(result)
+
+    def update_subscription(self, url, name, profiles, identity=None):
+        from .subscriptions import validate_url
+        validate_url(url)
+        if not profiles:
+            raise ValueError('Подписка пуста. Прежние профили сохранены.')
+        with self.lock:
+            value = self._read()
+            subscriptions = value.setdefault('subscriptions', [])
+            if identity is None:
+                identity = next((entry['id'] for entry in subscriptions if entry['url'] == url), None)
+            if identity is not None and not any(entry['id'] == identity for entry in subscriptions):
+                raise ValueError('Подписка не найдена.')
+            identity = identity or str(uuid.uuid4())
+            old = [entry for entry in value['profiles'] if entry.get('subscription_id') == identity]
+            ids = {entry['text']: entry['id'] for entry in old}
+            selected = next((entry for entry in old if entry['id'] == value['selected']), None)
+            new = [dict(entry, id=ids.get(entry['text'], str(uuid.uuid4())), subscription_id=identity) for entry in profiles]
+            value['profiles'] = [entry for entry in value['profiles'] if entry.get('subscription_id') != identity] + new
+            record = {'id': identity, 'url': url, 'name': str(name).strip()[:80] or 'Подписка', 'updated': int(time.time())}
+            value['subscriptions'] = [entry for entry in subscriptions if entry['id'] != identity] + [record]
+            if value['selected'] not in {entry['id'] for entry in value['profiles']}:
+                same_name = next((entry for entry in new if selected and entry['name'] == selected['name']), None)
+                value['selected'] = (same_name or new[0])['id']
+            self.file.write(value)  # URL and entire profile revision share one DPAPI transaction.
+            return identity
+
+    def remove_subscription(self, identity):
+        with self.lock:
+            value = self._read()
+            value['subscriptions'] = [entry for entry in value.get('subscriptions', []) if entry['id'] != identity]
+            # Detach profiles instead of deleting working saved connections.
+            for entry in value['profiles']:
+                if entry.get('subscription_id') == identity:
+                    entry.pop('subscription_id')
+            self.file.write(value)
 
     def save(self, text, name, protocol, profile_id=None):
         with self.lock:
@@ -123,3 +172,35 @@ class ProfileStore:
             value = self._read()
             value['selected'] = profile_id
             self.file.write(value)
+
+    def export_profiles(self):
+        with self.lock:
+            return {'format': 'yukiwire-profiles', 'version': 1,
+                    'profiles': [{'name': p['name'], 'text': p['text']} for p in self._read()['profiles']]}
+
+    def import_profiles(self, backup, validate):
+        if (not isinstance(backup, dict) or backup.get('format') != 'yukiwire-profiles' or
+                backup.get('version') != 1 or not isinstance(backup.get('profiles'), list) or
+                not 1 <= len(backup['profiles']) <= 100):
+            raise ValueError('Некорректный файл переноса профилей (допускается 1–100 профилей).')
+        entries = []
+        for item in backup['profiles']:
+            if not isinstance(item, dict) or not isinstance(item.get('name'), str) or not isinstance(item.get('text'), str):
+                raise ValueError('Некорректная запись профиля.')
+            protocol = validate(item['text'])
+            entries.append({'id': str(uuid.uuid4()), 'name': item['name'].strip()[:80] or 'Профиль',
+                            'protocol': protocol, 'text': item['text']})
+        with self.lock:
+            value = self._read()
+            existing = {p['text'] for p in value['profiles']}
+            count = 0
+            for entry in entries:
+                if entry['text'] in existing:
+                    continue
+                value['profiles'].append(entry)
+                existing.add(entry['text'])
+                count += 1
+            if not value['selected'] and value['profiles']:
+                value['selected'] = value['profiles'][0]['id']
+            self.file.write(value)  # One atomic write after the whole import was validated.
+            return count

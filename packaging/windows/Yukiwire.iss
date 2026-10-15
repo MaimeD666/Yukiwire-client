@@ -3,6 +3,14 @@
   #error PayloadInclude is required
 #endif
 
+#ifdef InstallerTest
+  #define AppMutexName "Local\Yukiwire.InstallerTest.NativeShell"
+  #define SetupMutexName "Local\Yukiwire.InstallerTest.Setup"
+#else
+  #define AppMutexName "Local\Yukiwire.NativeShell"
+  #define SetupMutexName "Local\Yukiwire.Setup"
+#endif
+
 [Setup]
 #ifdef InstallerTest
 AppId=Yukiwire.Desktop.InstallerTest
@@ -26,8 +34,8 @@ DisableProgramGroupPage=yes
 AllowNoIcons=yes
 UsePreviousAppDir=yes
 UsePreviousTasks=yes
-AppMutex=Local\Yukiwire.NativeShell
-SetupMutex=Local\Yukiwire.Setup
+AppMutex={#AppMutexName}
+SetupMutex={#SetupMutexName}
 CloseApplications=no
 RestartApplications=no
 UninstallDisplayIcon={app}\Yukiwire.exe
@@ -48,8 +56,8 @@ english.PendingRecovery=Network recovery is unfinished. Open Yukiwire, disconnec
 russian.PendingRecovery=Восстановление сети не завершено. Откройте Yukiwire, отключитесь и выполните восстановление сети в настройках. Затем закройте приложение и повторите попытку. Настройки сети и профили сохранены.
 english.CloseApp=Close Yukiwire using Exit in the tray before continuing. This will disconnect its active connection.
 russian.CloseApp=Перед продолжением закройте Yukiwire через «Выход» в трее. Активное подключение будет отключено.
-english.WebViewInstalling=Installing Microsoft Edge WebView2 Runtime. Internet access is required...
-russian.WebViewInstalling=Установка Microsoft Edge WebView2 Runtime. Требуется доступ к Интернету...
+english.WebViewInstalling=Installing the bundled Microsoft Edge WebView2 Runtime...
+russian.WebViewInstalling=Установка Microsoft Edge WebView2 Runtime из комплекта Yukiwire...
 english.WebViewFailed=Could not install Microsoft Edge WebView2 Runtime. Check your connection or install the Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and try again.
 russian.WebViewFailed=Не удалось установить Microsoft Edge WebView2 Runtime. Проверьте Интернет или установите Runtime с https://developer.microsoft.com/microsoft-edge/webview2/ и повторите попытку.
 english.LaunchApp=Launch Yukiwire
@@ -98,18 +106,19 @@ var
   ExitCode: Integer;
 begin
   Result := '';
-  if CheckForMutexes('Local\Yukiwire.NativeShell') then begin
+  if CheckForMutexes('{#AppMutexName}') then begin
     Result := CustomMessage('CloseApp');
     Exit;
   end;
-  if FileExists(ExpandConstant('{app}\state\network-lease.dpapi')) then begin
+  if FileExists(ExpandConstant('{app}\state\network-lease.dpapi')) or
+     FileExists(ExpandConstant('{app}\state\kill-switch.dpapi')) then begin
     Result := CustomMessage('PendingRecovery');
     Exit;
   end;
   if not HasWebView2 then begin
     WizardForm.StatusLabel.Caption := CustomMessage('WebViewInstalling');
-    ExtractTemporaryFile('MicrosoftEdgeWebview2Setup.exe');
-    if not Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '',
+    ExtractTemporaryFile('MicrosoftEdgeWebView2RuntimeInstallerX64.exe');
+    if not Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe'), '/silent /install', '',
         SW_HIDE, ewWaitUntilTerminated, ExitCode) then begin
       Result := CustomMessage('WebViewFailed');
       Exit;
@@ -121,7 +130,8 @@ end;
 
 function InitializeUninstall: Boolean;
 begin
-  Result := not FileExists(ExpandConstant('{app}\state\network-lease.dpapi'));
+  Result := not FileExists(ExpandConstant('{app}\state\network-lease.dpapi')) and
+    not FileExists(ExpandConstant('{app}\state\kill-switch.dpapi'));
   if not Result and not UninstallSilent then
     MsgBox(CustomMessage('PendingRecovery'), mbCriticalError, MB_OK);
 end;

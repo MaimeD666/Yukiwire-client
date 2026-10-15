@@ -32,6 +32,48 @@ def geo_fixture():
 
 
 class GeoDataTests(unittest.TestCase):
+    def test_offline_bundled_rules_are_verified_and_survive_rollback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            core = Path(temporary) / 'core'
+            core.mkdir()
+            hashes = {}
+            for name, data in geo_fixture().items():
+                (core / name).write_bytes(data)
+                hashes[name] = hashlib.sha256(data).hexdigest()
+            bundled = {'version': 'Bundled', 'custom': False, 'sha256': hashes}
+            (core / 'rules.json').write_text(json.dumps(bundled))
+            with patch('yukiwire.geodata.CORE', core / 'xray.exe'):
+                manager = RuleSets(Path(temporary) / 'rulesets')
+                self.assertEqual(manager.metadata(), bundled)
+                self.assertIn('ru-blocked', manager.tags())
+                with patch('yukiwire.geodata.download', self._download()):
+                    manager.update(lambda tags: None)
+                seen = []
+                manager.rollback(seen.append)
+                self.assertEqual(seen[0]['ru-blocked'], 'geosite:ru-blocked')
+                (core / 'geosite.dat').write_bytes(b'corrupt')
+                with self.assertRaises(ValueError): manager.tags()
+
+    def test_mirror_uses_same_immutable_blob_validation(self):
+        for corrupt in (False, True):
+            with self.subTest(corrupt=corrupt), tempfile.TemporaryDirectory() as temporary:
+                manager = RuleSets(temporary)
+                source = self._download(tampered=corrupt)
+                seen = []
+                def download(url, *args):
+                    seen.append((url, args[0]))
+                    if url.startswith('https://raw.githubusercontent.com/'):
+                        raise OSError('public fixture: primary source unavailable')
+                    return source(url, *args)
+                with patch('yukiwire.geodata.download', download):
+                    if corrupt:
+                        with self.assertRaises(ValueError): manager.update(lambda tags: None, 12345)
+                        self.assertFalse(manager.active.exists())
+                    else:
+                        self.assertTrue(manager.update(lambda tags: None, 12345)['custom'])
+                self.assertTrue(any('cdn.jsdelivr.net/gh/' in url and '@' + 'a' * 40 in url for url, _ in seen))
+                self.assertTrue(all(port == 12345 for _, port in seen))
+
     def test_active_data_tampering_is_rejected_before_connect(self):
         with tempfile.TemporaryDirectory() as temporary:
             manager = RuleSets(temporary)

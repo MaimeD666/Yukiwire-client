@@ -32,11 +32,11 @@ class ConflictDetectionTests(unittest.TestCase):
     def setUp(self):
         self.adapter = Adapter({'flags': 1, 'server': '', 'bypass': '', 'pac': ''})
 
-    def test_closed_vpn_is_removed_on_next_scan(self):
-        with patch('yukiwire.network.running_process_names', side_effect=[{'nekoray.exe'}, set()]), \
+    def test_idle_vpn_process_does_not_block_capture(self):
+        with patch('yukiwire.network.running_process_names', return_value={'nekoray.exe'}) as processes, \
              patch('yukiwire.windows_snapshot.foreign_capture_present', return_value=False):
-            self.assertTrue(conflicts(self.adapter)['other_vpn'])
             self.assertEqual(conflicts(self.adapter), {'other_proxy': False, 'other_vpn': False, 'check_failed': False})
+            processes.assert_not_called()
 
     def test_closing_ui_does_not_hide_a_remaining_vpn_route_or_proxy(self):
         with patch('yukiwire.network.running_process_names', return_value=set()), \
@@ -47,9 +47,8 @@ class ConflictDetectionTests(unittest.TestCase):
              patch('yukiwire.windows_snapshot.foreign_capture_present', return_value=False):
             self.assertTrue(conflicts(self.adapter)['other_proxy'])
 
-    def test_incomplete_process_scan_cannot_certify_safe_capture(self):
-        with patch('yukiwire.network.running_process_names', side_effect=OSError('denied')), \
-             patch('yukiwire.windows_snapshot.foreign_capture_present', return_value=False):
+    def test_incomplete_route_scan_cannot_certify_safe_capture(self):
+        with patch('yukiwire.windows_snapshot.foreign_capture_present', side_effect=OSError('denied')):
             result = conflicts(self.adapter)
         self.assertTrue(result['check_failed'])
         self.assertTrue(result['other_vpn'])
@@ -251,3 +250,20 @@ class ProxyRecoveryTests(unittest.TestCase):
         self.assertEqual(tun['settings']['autoSystemRoutingTable'], ['0.0.0.0/1', '128.0.0.0/1', '::/1', '8000::/1'])
         self.assertNotIn('0.0.0.0/0', tun['settings']['autoSystemRoutingTable'])
         self.assertEqual(tun['settings']['autoOutboundsInterface'], 'auto')
+
+    def test_normal_user_clears_native_lease_only_after_confirmed_cleanup(self):
+        for clean in (False, True):
+            self.journal.value = {'version': 1, 'kind': 'tun', 'owner': 100, 'lease_id': 'test',
+                                  'adapter': 'Yukiwire-0123456789ab', 'description': 'Yukiwire 0123456789ab',
+                                  'protected_helper': True}
+            with patch('yukiwire.network.journal_lock', return_value=nullcontext()), \
+                 patch('yukiwire.network.ctypes.windll.shell32.IsUserAnAdmin', return_value=0), \
+                 patch('yukiwire.network.tun_clean', return_value=clean), \
+                 patch('yukiwire.network.unregister_recovery'), \
+                 patch('yukiwire.network.subprocess.run') as execute:
+                result = recover_journal(self.journal)
+            execute.assert_not_called()
+            self.assertEqual(result['restored'], clean)
+            if not clean:
+                self.assertTrue(result['requires_elevation'])
+                self.assertIsNotNone(self.journal.value)

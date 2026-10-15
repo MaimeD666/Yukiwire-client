@@ -4,11 +4,13 @@ import ssl
 import time
 import re
 from concurrent.futures import ThreadPoolExecutor
+from .version import VERSION, USER_AGENT
+from .endpoints import Endpoint, HTTP_PORT, PROBE_PORT
 
 SITES = ('example.com', 'github.com', 'www.youtube.com', 'chatgpt.com', 'auth.openai.com')
 
 
-def diagnostic_config(config):
+def diagnostic_config(config, endpoint=None):
     """Separate probe listener pins checks to the primary outbound, including split routing."""
     primary = next((o for o in config['outbounds'] if o['protocol'] not in ('freedom', 'blackhole', 'dns', 'loopback')), config['outbounds'][0])
     if not primary.get('tag'):
@@ -17,8 +19,15 @@ def diagnostic_config(config):
         while tag in used:
             tag += '-1'
         primary['tag'] = tag
-    config['inbounds'].append({'tag': 'yukiwire-check', 'listen': '127.0.0.1', 'port': 11812, 'protocol': 'http', 'settings': {}})
-    config.setdefault('routing', {}).setdefault('rules', []).insert(0, {'type': 'field', 'inboundTag': ['yukiwire-check'], 'outboundTag': primary['tag']})
+    config['inbounds'].append((endpoint or Endpoint(PROBE_PORT)).inbound('yukiwire-check'))
+    rules = config.setdefault('routing', {}).setdefault('rules', [])
+    rule = {'type': 'field', 'inboundTag': ['yukiwire-check'], 'outboundTag': primary['tag']}
+    if endpoint and endpoint.username:
+        # This authenticated listener serves built-in checks, never arbitrary destinations.
+        rule.update(domain=['full:' + host for host in (*SITES, 'www.cloudflare.com')], port='443')
+        config['outbounds'].append({'tag': 'yukiwire-check-block', 'protocol': 'blackhole'})
+        rules.insert(0, {'type': 'field', 'inboundTag': ['yukiwire-check'], 'outboundTag': 'yukiwire-check-block'})
+    rules.insert(0, rule)
     return config
 
 
@@ -30,11 +39,13 @@ def trace_country(data):
     return country  # Never retain the trace's IP, user-agent, or full body.
 
 
-def exit_country(port=11812, host='www.cloudflare.com'):
-    connection = http.client.HTTPSConnection('127.0.0.1', port, timeout=10, context=ssl.create_default_context())
-    connection.set_tunnel(host, 443)
+def exit_country(port=PROBE_PORT, host='www.cloudflare.com', headers=None):
+    connection = http.client.HTTPSConnection('127.0.0.1' if port is not None else host,
+                                             port if port is not None else 443, timeout=10, context=ssl.create_default_context())
+    if port is not None:
+        connection.set_tunnel(host, 443, headers=headers or {})
     try:
-        connection.request('GET', '/cdn-cgi/trace', headers={'Host': host, 'User-Agent': 'Yukiwire/0.4', 'Connection': 'close'})
+        connection.request('GET', '/cdn-cgi/trace', headers={'Host': host, 'User-Agent': USER_AGENT, 'Connection': 'close'})
         response = connection.getresponse()
         if response.status != 200:
             return {'country': None, 'http_status': response.status, 'source': host}
@@ -45,21 +56,24 @@ def exit_country(port=11812, host='www.cloudflare.com'):
         connection.close()
 
 
-def check_exit():
+def check_exit(endpoints=None, capture='local'):
+    endpoints = endpoints or {'probe': Endpoint(PROBE_PORT), 'http': Endpoint(HTTP_PORT)}
     with ThreadPoolExecutor(max_workers=2) as executor:
-        profile = executor.submit(exit_country)
-        chatgpt = executor.submit(exit_country, 11809, 'chatgpt.com')
+        profile = executor.submit(exit_country, endpoints['probe'].port, headers=endpoints['probe'].headers)
+        # The route check also works in pure TUN without an ordinary HTTP inbound.
+        chatgpt = executor.submit(exit_country, None if capture == 'tun' else endpoints['http'].port, 'chatgpt.com')
         return {'profile': profile.result(), 'chatgpt_route': chatgpt.result()}
 
 
-def check_connection(capture='local'):
+def check_connection(capture='local', endpoints=None):
+    endpoints = endpoints or {'probe': Endpoint(PROBE_PORT), 'http': Endpoint(HTTP_PORT)}
     with ThreadPoolExecutor(max_workers=2) as executor:
-        sites = executor.submit(check_sites, capture=capture)
-        country = executor.submit(check_exit)
+        sites = executor.submit(check_sites, endpoints['http'].port, capture, endpoints['probe'])
+        country = executor.submit(check_exit, endpoints, capture)
         return {'results': sites.result(), 'exit': country.result()}
 
 
-def check_sites(port=11809, capture='local'):
+def check_sites(port=HTTP_PORT, capture='local', probe_endpoint=None):
     # An explicit proxy bypasses the TUN ingress and can hide packet-filter failures.
     actual_port = None if capture == 'tun' else port
     def check(host):
@@ -81,7 +95,8 @@ def check_sites(port=11809, capture='local'):
                 result['message'] = 'Нарушена целостность TLS. Возможен конфликт сетевого фильтра с TUN.' if capture == 'tun' else 'Нарушена целостность TLS.'
             if capture == 'tun':
                 try:
-                    comparison = probe_https(port=11812, host=host, timeout=10)
+                    endpoint = probe_endpoint or Endpoint(PROBE_PORT)
+                    comparison = probe_https(port=endpoint.port, host=host, timeout=10, **({'headers': endpoint.headers} if endpoint.username else {}))
                     result['vpn_transport_ok'] = True
                     result['vpn_http_status'] = comparison['http_status']
                     result['vpn_accessible'] = 200 <= comparison['http_status'] < 400
@@ -94,14 +109,14 @@ def check_sites(port=11809, capture='local'):
         return list(executor.map(check, SITES))
 
 
-def probe_https(port=11809, host='example.com', path='/', timeout=15):
+def probe_https(port=HTTP_PORT, host='example.com', path='/', timeout=15, headers=None):
     started = time.monotonic()
     connection = http.client.HTTPSConnection('127.0.0.1' if port is not None else host, port if port is not None else 443, timeout=timeout,
                                              context=ssl.create_default_context())
     if port is not None:
-        connection.set_tunnel(host, 443)
+        connection.set_tunnel(host, 443, headers=headers or {})
     try:
-        connection.request('GET', path, headers={'Host': host, 'User-Agent': 'Yukiwire/0.4', 'Connection': 'close'})
+        connection.request('GET', path, headers={'Host': host, 'User-Agent': USER_AGENT, 'Connection': 'close'})
         response = connection.getresponse()
         response.read(1024)
         return {'http_status': response.status, 'elapsed_ms': round((time.monotonic() - started) * 1000),

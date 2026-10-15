@@ -6,6 +6,11 @@
     capture: 'local',
     tun_system_proxy: false,
     dns: 'system',
+    debug_logging: false,
+    kill_switch: false,
+    dns_direct: 'system',
+    dns_vpn: 'https://1.1.1.1/dns-query',
+    browser_home: 'about:blank',
     ru_ip: false,
     auto_reconnect: true,
     reconnect_on_change: false,
@@ -19,12 +24,18 @@
     ready: false,
     phase: 'idle',
     active: false,
+    networkBlocked: false,
     activeSettings: null,
+    endpoints: {},
     settingsPending: false,
     settings: {
       ...defaults
     },
     profiles: [],
+    subscriptions: [],
+    profileLatencies: {},
+    profilesChecking: false,
+    subscriptionBusy: false,
     selected: null,
     environment: {},
     rules: {},
@@ -179,6 +190,7 @@
       'Не удалось проверить окружение Windows. Повторная проверка выполняется автоматически.' :
       'Обнаружен другой VPN или системный прокси. Доступен локальный режим. Проверка каждые 5 секунд.';
     const btn = $('connect-button');
+    $('protection-notice').hidden = !state.networkBlocked || state.active;
     btn.disabled = !state.ready || phase === 'stopping' || !!pendingSettings || editorBusy;
     const blockedCapture = !locked() && p && conflict() && state.settings.capture !== 'local';
     btn.disabled ||= !!blockedCapture;
@@ -213,6 +225,19 @@
     if (String(profile.protocol).toLowerCase().includes('json')) state.settings.preset = 'original';
     else if (state.settings.preset === 'original') state.settings.preset = 'ru-direct';
     render();
+  }
+
+  function renderEndpoints() {
+    document.querySelectorAll('[data-endpoint]').forEach(button => {
+      const name = button.dataset.endpoint, endpoint = state.endpoints[name];
+      button.disabled = !endpoint;
+      button.querySelector('code').textContent = endpoint ? `127.0.0.1:${endpoint.port}` : 'После подключения';
+      if (endpoint) {
+        button.dataset.copy = name === 'socks'
+          ? `socks5://${encodeURIComponent(endpoint.username)}:${encodeURIComponent(endpoint.password)}@127.0.0.1:${endpoint.port}`
+          : `127.0.0.1:${endpoint.port}`;
+      } else delete button.dataset.copy;
+    });
   }
 
   function renderHomeControls() {
@@ -350,6 +375,7 @@
   }
 
   function receive(data) {
+    if (typeof data.network_blocked === 'boolean') state.networkBlocked = data.network_blocked;
     if (!data || typeof data.event !== 'string') return;
     switch (data.event) {
       case 'window_state': {
@@ -365,6 +391,10 @@
           ...data.settings
         };
         state.profiles = data.profiles || [];
+        state.subscriptions = data.subscriptions || [];
+        state.profileLatencies = Object.fromEntries(Object.entries(data.profile_latencies || {}).map(([id, result]) => [id, result.elapsed_ms]));
+        state.profilesChecking = !!data.profiles_checking;
+        state.subscriptionBusy = !!data.subscription_busy;
         state.selected = data.selected;
         state.environment = data.environment || {};
         state.rules = data.rules || {};
@@ -373,7 +403,35 @@
         break;
       case 'profiles':
         state.profiles = data.profiles || [];
+        state.subscriptions = data.subscriptions || [];
         state.selected = data.selected ?? (state.profiles.some(p => p.id === state.selected) ? state.selected : state.profiles[0]?.id ?? null);
+        if (state.panel === 'profiles') renderProfiles();
+        renderSubscriptions();
+        break;
+      case 'subscription_updating':
+        state.subscriptionBusy = true;
+        renderSubscriptions();
+        break;
+      case 'subscription_updated':
+        state.subscriptionBusy = false;
+        if ($('subscription-url')) $('subscription-url').value = '';
+        renderSubscriptions();
+        notice(`Подписка обновлена: ${data.count} профилей. Текущее подключение сохранено.`);
+        break;
+      case 'subscription_removed':
+        renderSubscriptions();
+        notice('Подписка удалена. Её профили остались в библиотеке.');
+        break;
+      case 'profiles_checking':
+        state.profilesChecking = true;
+        renderSubscriptions();
+        break;
+      case 'profiles_checked':
+        state.profilesChecking = false;
+        renderSubscriptions();
+        break;
+      case 'profile_latency':
+        state.profileLatencies[data.profile_id] = data.elapsed_ms;
         if (state.panel === 'profiles') renderProfiles();
         break;
       case 'environment':
@@ -428,6 +486,8 @@
         state.phase = 'connecting';
         break;
       case 'started':
+        state.endpoints = data.endpoints || {};
+        renderEndpoints();
         if (data.transient) state.transient = data.transient;
         state.phase = 'checking';
         state.active = true;
@@ -447,6 +507,8 @@
         state.settingsPending = !!data.settings_pending;
         break;
       case 'stopped':
+        state.endpoints = {};
+        renderEndpoints();
         if (state.transient && !state.transient.text) state.transient = null;
         state.phase = 'idle';
         state.active = false;
@@ -507,6 +569,21 @@
         text('route-explanation',
           `${data.route} · ${data.reason}${data.definitive?'':' Это предварительная оценка.'}`);
         break;
+      case 'profiles_exported':
+        notice('Профили экспортированы. Файл содержит ключи подключения.');
+        break;
+      case 'profiles_imported':
+        notice(`Импортировано профилей: ${data.count}. Существующие профили сохранены.`);
+        break;
+      case 'updates_checking':
+        if ($('update-check')) $('update-check').disabled = true;
+        text('update-status', 'Проверяем GitHub…');
+        break;
+      case 'updates_checked':
+        if ($('update-check')) $('update-check').disabled = false;
+        if ($('update-release')) $('update-release').hidden = !data.available;
+        text('update-status', data.available ? `Доступна версия ${data.latest}. Установлена ${data.current}.` : `Версия ${data.current} актуальна.`);
+        break;
       case 'rules_updating':
         rulesBusy = true;
         setRulesBusy();
@@ -516,12 +593,16 @@
         state.rules = data.rules || {};
         setRulesBusy();
         rulesVersion();
-        notice('Списки проверены и обновлены.');
+        state.settingsPending = !!data.settings_pending;
+        notice(data.settings_pending ? 'Списки обновлены для следующего подключения.' : 'Списки проверены и обновлены.');
         break;
       case 'recovered':
         notice(data.conflict ? 'Есть конфликт восстановления. Текущие настройки сохранены.' : data
           .restored ? 'Собственные изменения восстановлены.' :
           'Незавершённых изменений Yukiwire нет.', !!data.conflict, true);
+        break;
+      case 'diagnostics_cleared':
+        notice('Технические события и предыдущий отчёт удалены.');
         break;
       case 'diagnostics_exported':
         notice('Отчёт сохранён: ' + data.path, false, true);
@@ -548,6 +629,14 @@
         }
         break;
       case 'error':
+        if (data.operation === 'check_updates') {
+          if ($('update-check')) $('update-check').disabled = false;
+          text('update-status', 'Проверка не удалась. Повторите позже.');
+        }
+        if (data.operation === 'update_subscription') {
+          state.subscriptionBusy = false;
+          renderSubscriptions();
+        }
         state.checking = false;
         rulesBusy = false;
         setRulesBusy();
@@ -761,6 +850,7 @@
     list.replaceChildren();
     const query = ($('profile-search')?.value || '').trim().toLocaleLowerCase('ru');
     const profiles = state.profiles.filter(p => `${p.name} ${p.protocol}`.toLocaleLowerCase('ru').includes(query));
+    if ($('sort-profiles')?.checked) profiles.sort((a, b) => (state.profileLatencies[a.id] ?? Infinity) - (state.profileLatencies[b.id] ?? Infinity));
     if (!profiles.length) {
       const empty = node('div', 'empty-state');
       empty.append(icon(query ? 'search' : 'rosette'), node('h3', '', query ? 'Ничего не нашлось' : 'Нет профилей'),
@@ -785,6 +875,7 @@
       choose.append(badge);
       const caption = node('span');
       caption.append(node('strong', '', p.name), node('small', '', String(p.protocol).toUpperCase() + (p.id === state.selected ? ' · Выбран' : '')));
+      if (Object.hasOwn(state.profileLatencies, p.id)) caption.append(node('small', '', state.profileLatencies[p.id] == null ? 'HTTPS: нет ответа' : `HTTPS: ${state.profileLatencies[p.id]} мс`));
       choose.append(caption);
       choose.onclick = () => {
         if (locked() || editorBusy || pendingSettings) return;
@@ -818,11 +909,19 @@
 
   function setupProfiles() {
     renderProfiles();
+    renderSubscriptions();
+    $('sort-profiles').onchange = renderProfiles;
+    $('check-profiles').onclick = () => send('check_profiles', {profile_ids: state.profiles.slice(0, 20).map(p => p.id)});
+    $('subscription-form').onsubmit = event => {
+      event.preventDefault();
+      if (!state.subscriptionBusy) send('update_subscription', {url: $('subscription-url').value.trim(), name: $('subscription-name').value.trim()});
+    };
     $('add-profile').disabled = locked();
     $('add-profile').onclick = () => openEditor('', '', null);
     $('cancel-editor').onclick = () => { clearEditor(); $('add-profile').focus(); };
     $('profile-search').oninput = renderProfiles;
     $('import-file').onclick = () => send('import_file');
+    $('import-qr').onclick = importQr;
     $('show-secret').onchange = e => $('edit-profile').classList.toggle('revealed', e.target.checked);
     const temporary = node('button', 'secondary full-width temporary-connect', 'Подключить без сохранения');
     temporary.id = 'temporary-connect';
@@ -856,6 +955,54 @@
         profile_id: editingId
       });
     };
+  }
+
+  function renderSubscriptions() {
+    const list = $('subscription-list');
+    if (!list) return;
+    list.replaceChildren();
+    $('subscription-submit').disabled = state.subscriptionBusy || !state.ready;
+    $('check-profiles').disabled = state.profilesChecking || !state.profiles.length || !state.ready;
+    $('check-profiles').textContent = state.profilesChecking ? 'Проверяем HTTPS…' : 'Измерить HTTPS · до 20 профилей';
+    for (const subscription of state.subscriptions) {
+      const row = node('div', 'button-row');
+      row.append(node('span', '', subscription.name));
+      const update = node('button', 'text-button', 'Обновить');
+      update.disabled = state.subscriptionBusy;
+      update.onclick = () => send('update_subscription', {subscription_id: subscription.id});
+      const remove = node('button', 'text-button', 'Убрать подписку');
+      remove.disabled = state.subscriptionBusy;
+      remove.onclick = () => send('remove_subscription', {subscription_id: subscription.id});
+      row.append(update, remove); list.append(row);
+    }
+  }
+
+  function importQr() {
+    const picker = document.createElement('input');
+    picker.type = 'file'; picker.accept = 'image/png,image/jpeg,image/webp';
+    picker.onchange = async () => {
+      const file = picker.files?.[0];
+      if (!file) return;
+      let bitmap;
+      try {
+        if (file.size > 10 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error();
+        bitmap = await createImageBitmap(file);
+        if (bitmap.width * bitmap.height > 24000000) throw new Error();
+        const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const context = canvas.getContext('2d', {willReadFrequently: true});
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        const result = window.jsQR(pixels.data, pixels.width, pixels.height);
+        if (!result || !/^(vless|vmess|trojan|ss|hy2|hysteria2):\/\//i.test(result.data)) throw new Error();
+        if (!$('edit-profile') || locked() || editorBusy) return;
+        openEditor(result.data, $('edit-name').value, editingId);
+        notice('QR прочитан локально. Проверьте и сохраните профиль.');
+      } catch (error) { notice('Не найден QR с поддерживаемой ссылкой. Выберите PNG, JPEG или WebP до 10 МиБ.', true); }
+      finally { bitmap?.close(); picker.remove(); }
+    };
+    picker.click();
   }
 
   function clearEditor() {
@@ -1021,9 +1168,9 @@
   }
 
   function setRulesBusy() {
-    if ($('rules-lock-hint')) $('rules-lock-hint').hidden = !locked();
+    if ($('rules-lock-hint')) $('rules-lock-hint').hidden = !state.active;
     document.querySelectorAll('[data-action="update_rules"],[data-action="rollback_rules"]').forEach(
-      el => el.disabled = rulesBusy || locked());
+      el => el.disabled = rulesBusy || !state.ready);
   }
 
   function setupSettings() {

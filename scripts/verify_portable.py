@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import zipfile
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,7 +86,7 @@ profile = 'vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=t
 session = Session()
 try:
     session.start(profile)
-    c = http.client.HTTPConnection('127.0.0.1', 11809, timeout=5)
+    c = http.client.HTTPConnection('127.0.0.1', session.endpoints['http'].port, timeout=5)
     try:
         c.request('GET', 'http://127.0.0.1:' + sys.argv[1] + '/')
         assert c.getresponse().read().startswith(b'portable-real-core-fixture')
@@ -108,9 +109,14 @@ print('Bundled runtime, real-core traffic, metrics and backend start/stop: passe
                            env=environment, check=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
             print('Bundled runtime, real-core traffic, metrics and backend start/stop: passed')
             if args.native:
+                # The public binary must not contain integration entry points.
+                # Exercise the packaged dependencies with a separately compiled test host.
+                from build_native import build
+                test_host = bundle / 'Yukiwire.Test.exe'
+                shutil.copy2(build(test=True), test_host)
                 profile = directory / 'public-fixture.txt'
                 profile.write_text('vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls', encoding='utf-8')
-                process = subprocess.Popen([str(bundle / 'Yukiwire.exe'), '--integration-worker', str(profile)],
+                process = subprocess.Popen([str(test_host), '--integration-worker', str(profile)],
                                            cwd=directory, env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
                 try:
                     process.wait(timeout=50)

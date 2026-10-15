@@ -7,11 +7,14 @@ import re
 import subprocess
 import tempfile
 import zipfile
+import sys
 
 from download_installer_tools import install
 
 ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE = ROOT / 'dist/Yukiwire-0.4-win-x64.zip'
+sys.path.insert(0, str(ROOT))
+from yukiwire.version import PACKAGE_NAME
+ARCHIVE = ROOT / 'dist' / (PACKAGE_NAME + '.zip')
 
 
 def payload(archive_path):
@@ -22,7 +25,7 @@ def payload(archive_path):
         if len(set(name.casefold() for name in names)) != len(names):
             raise ValueError('Duplicate installer payload paths')
         files = {}
-        public_folders = {'python', 'yukiwire', 'core', 'ui', 'docs', 'helpers', 'scripts', 'licenses'}
+        public_folders = {'python', 'yukiwire', 'core', 'ui', 'docs', 'helpers', 'scripts', 'licenses', 'network'}
         public_files = {'Yukiwire.exe', 'README.md', 'THIRD_PARTY.md', 'TESTING.md',
                         'technical-test.cmd', 'portable.json', 'SHA256SUMS.json',
                         'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.Wpf.dll', 'WebView2Loader.dll'}

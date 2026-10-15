@@ -5,6 +5,7 @@ import subprocess
 from collections import deque
 import threading
 import json
+from .diagnostics import core_event
 
 
 class BasicLimits(ctypes.Structure):
@@ -22,13 +23,14 @@ class ExtendedLimits(ctypes.Structure):
 
 class CoreProcess:
     """Windows kills the child when the owner's Job handle closes, even on a crash."""
-    def __init__(self, executable, config, before_resume=None):
+    def __init__(self, executable, config, before_resume=None, on_event=None):
         if os.name != 'nt':
             raise RuntimeError('Эта сборка предназначена для Windows.')
         self.process = None
         self.handle = None
         self.messages = deque(maxlen=30)
         self.reader = None
+        self.on_event = on_event
         self.api = ctypes.WinDLL('kernel32', use_last_error=True)
         self.api.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
         self.api.CreateJobObjectW.restype = wintypes.HANDLE
@@ -70,6 +72,11 @@ class CoreProcess:
             text = line.decode('utf-8', errors='replace').strip()
             # Keep only a diagnostic category, never raw server/UUID/path data.
             lower = text.lower()
+            if self.on_event:
+                try:
+                    self.on_event('core_log', **core_event(text))
+                except Exception:
+                    pass  # A diagnostic sink must not stop draining the child's pipe.
             if 'certificate' in lower or 'x509' in lower:
                 self.messages.append('TLS: ошибка проверки сертификата сервера.')
             elif 'timeout' in lower or 'deadline' in lower:

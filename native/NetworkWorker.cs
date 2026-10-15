@@ -1,3 +1,4 @@
+#if YUKIWIRE_TEST
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -14,7 +15,11 @@ namespace Yukiwire {
   [DllImport("kernel32.dll",SetLastError=true)] public static extern bool GetNamedPipeServerProcessId(IntPtr pipe,out uint pid);
   [DllImport("kernel32.dll",SetLastError=true)] public static extern bool GetNamedPipeClientProcessId(IntPtr pipe,out uint pid);
   public static int Run(string[] args) {
+#if YUKIWIRE_TEST
    bool test = args.Length == 6 && args[5] == "--test-session";
+#else
+   bool test = false;
+#endif
    if (args.Length != 5 && !test || !Regex.IsMatch(args[1],@"^Yukiwire\.[a-f0-9]{32}$")) return 2;
    int parentId; long parentTime;
    if (!Int32.TryParse(args[2],out parentId) || !Int64.TryParse(args[3],out parentTime)) return 2;
@@ -34,6 +39,7 @@ namespace Yukiwire {
        service.StartInfo.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
        service.StartInfo.EnvironmentVariables["PYTHON_DISABLE_REMOTE_DEBUG"] = "1";
        service.StartInfo.EnvironmentVariables["YUKIWIRE_TEST_SESSION"] = test ? "1" : "0";
+       service.StartInfo.EnvironmentVariables["YUKIWIRE_TEST_STATE"] = test ? Path.Combine(File.Exists(Path.Combine(root,"portable.json")) ? root : Path.Combine(root,"runtime"),"native-tests",parentId.ToString(),"state") : "";
        service.Start(); service.ErrorDataReceived += delegate { }; service.BeginErrorReadLine();
        // Holding this Process object binds the parent handle, avoiding PID reuse.
        var parentWatch = new Thread(delegate() { try { parent.WaitForExit(); service.StandardInput.Close(); pipe.Dispose(); } catch (Exception) { } });
@@ -62,3 +68,5 @@ namespace Yukiwire {
   }
  }
 }
+
+#endif

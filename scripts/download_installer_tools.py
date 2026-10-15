@@ -1,4 +1,4 @@
-"""Pinned Inno Setup in portable mode and a signed Microsoft WebView2 bootstrapper."""
+"""Pinned Inno Setup and signed offline Microsoft WebView2 installer."""
 import base64
 import hashlib
 import json
@@ -16,15 +16,17 @@ INNO_URL = f'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/inno
 # Resolved from Microsoft's official Evergreen bootstrapper link, signature verified.
 WEBVIEW_URL = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/c289719c-c70c-464b-81ea-9efa692d5428/MicrosoftEdgeWebview2Setup.exe'
 WEBVIEW_SHA256 = 'aa38a8cfce6179b87181609b1c730a29eaf26138fc833af5759e67576770f3a3'
+WEBVIEW_OFFLINE_URL = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/9f894531-f31c-4fe8-8678-2ced4725def4/MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
+WEBVIEW_OFFLINE_SHA256 = '3505a37b54a294c2bc423b30d6c02cd33a2e58dbcdc7e03b50d7a4112746c986'
 
 
-def signed_download(url, filename, digest, publisher):
+def signed_download(url, filename, digest, publisher, limit=32 * 1024 * 1024):
     TOOLS.mkdir(parents=True, exist_ok=True)
     target = TOOLS / filename
     if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
         with urllib.request.urlopen(url, timeout=90) as response:
-            data = response.read(32 * 1024 * 1024 + 1)
-        if hashlib.sha256(data).hexdigest() != digest:
+            data = response.read(limit + 1)
+        if len(data) > limit or hashlib.sha256(data).hexdigest() != digest:
             raise RuntimeError('Installer dependency SHA256 mismatch: ' + filename)
         target.write_bytes(data)
     payload = base64.b64encode(json.dumps({'path': str(target), 'publisher': publisher}).encode()).decode()
@@ -66,8 +68,9 @@ def install():
         hashes = {path.relative_to(compiler).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                   for path in compiler.rglob('*') if path.is_file() and path != marker}
         marker.write_text(json.dumps({'archive': INNO_SHA256, 'files': hashes}))
-    bootstrapper = signed_download(WEBVIEW_URL, 'MicrosoftEdgeWebview2Setup.exe', WEBVIEW_SHA256, 'Microsoft Corporation')
-    return compiler / 'ISCC.exe', bootstrapper
+    webview = signed_download(WEBVIEW_OFFLINE_URL, 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe',
+                              WEBVIEW_OFFLINE_SHA256, 'Microsoft Corporation', 256 * 1024 * 1024)
+    return compiler / 'ISCC.exe', webview
 
 
 if __name__ == '__main__':

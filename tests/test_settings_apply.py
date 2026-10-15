@@ -146,15 +146,14 @@ class SettingsApplyTests(unittest.TestCase):
         self.assertIsNone(self.service.session.core)
         self.assertNotIn('started', [e['event'] for e in self.events])
 
-    def test_local_to_tun_uses_private_host_handoff_after_cleanup(self):
+    def test_local_to_tun_restarts_session_without_elevating_python(self):
         with patch('yukiwire.backend.ctypes.windll.shell32.IsUserAnAdmin', return_value=0):
             self.save(reconnect_on_change=True, capture='tun')
         self.service.session.stop.assert_called_once()
-        self.service.session.start.assert_not_called()
-        handoff = next(e for e in self.events if e['event'] == 'settings_elevation_required')
-        self.assertEqual(handoff['request']['profile_id'], 'saved-profile')
-        self.assertIsNone(handoff['request']['profile'])
-        self.assertNotIn('stopped', [e['event'] for e in self.events])
+        self.service.session.start.assert_called_once()
+        self.assertEqual(self.service.session.start.call_args.args[1]['capture'], 'tun')
+        self.assertNotIn('settings_elevation_required', [e['event'] for e in self.events])
+        self.assertIn('started', [e['event'] for e in self.events])
 
     def test_dormant_options_do_not_reconnect_other_presets_or_capture_modes(self):
         self.save(reconnect_on_change=True, ru_ip=True, tun_system_proxy=True, game_processes='cs2.exe')

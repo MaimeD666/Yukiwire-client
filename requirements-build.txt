@@ -1,0 +1,1 @@
+# No pip packages required. Build uses Windows x64 CPython 3.11+ and .NET Framework.

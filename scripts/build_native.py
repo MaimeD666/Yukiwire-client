@@ -9,7 +9,10 @@ from download_webview import install
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def build():
+def build(test=False):
+    if (ROOT / 'runtime/core/xray.exe').is_file() and (ROOT / 'runtime/core/wintun.dll').is_file():
+        from build_network import build as build_network
+        build_network()
     framework = Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Microsoft.NET' / 'Framework64' / 'v4.0.30319'
     compiler = framework / 'csc.exe'
     icon = ROOT / 'ui' / 'assets' / 'yukiwire.ico'
@@ -20,7 +23,7 @@ def build():
         subprocess.run([str(compiler), '/nologo', '/target:exe', '/out:' + str(generator),
                         '/reference:' + str(framework / 'System.Drawing.dll'), str(icon_source)], check=True)
         subprocess.run([str(generator), str(icon)], check=True)
-    output = ROOT / 'runtime' / 'Yukiwire.exe'
+    output = ROOT / 'runtime' / ('Yukiwire.Test.exe' if test else 'Yukiwire.exe')
     output.parent.mkdir(parents=True, exist_ok=True)
     source = ROOT / 'native' / 'WebShell.cs'
     sdk = install()
@@ -48,6 +51,8 @@ def build():
         raise RuntimeError('Нет компилятора .NET Framework 4.x для Windows-хоста.')
     command = [str(compiler), '/nologo', '/target:winexe', '/platform:x64', '/out:' + str(output)]
     command += ['/win32manifest:' + str(manifest), '/win32icon:' + str(icon)]
+    if test:
+        command.append('/define:YUKIWIRE_TEST')
     command += ['/reference:' + str(reference) for reference in references]
     command.append(str(source))
     command.append(str(worker_source))
@@ -56,4 +61,7 @@ def build():
 
 
 if __name__ == '__main__':
-    print(build())
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--test', action='store_true', help='Build a separate, non-distributable test host')
+    print(build(test=parser.parse_args().test))

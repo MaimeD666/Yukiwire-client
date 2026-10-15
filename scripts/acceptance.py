@@ -17,15 +17,14 @@ import threading
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from yukiwire.health import check_connection
 from yukiwire.network import (WinInetProxy, conflicts, inspect_tun, process_command,
                               process_identity, recover_stale, tun_preflight)
 from yukiwire.paths import CORE, ROOT, RUNTIME, STATE
 from yukiwire.routing import DEFAULTS
+from yukiwire.version import VERSION
 from yukiwire.storage import ProfileStore, atomic_write
 from yukiwire.windows_snapshot import foreign_snapshot
 
-PORTS = (11808, 11809, 11811, 11812)
 
 
 class AcceptanceError(ValueError):
@@ -46,11 +45,11 @@ def snapshot():
     return {'proxy': digest(WinInetProxy().read()), 'foreign_interfaces': digest(foreign_snapshot())}
 
 
-def wait_clean(before, timeout=25):
+def wait_clean(before, ports=(), timeout=25):
     deadline = time.monotonic() + timeout
     stable = 0
     while time.monotonic() < deadline:
-        clean = not (STATE / 'network-lease.dpapi').exists() and not any(map(port_open, PORTS))
+        clean = not (STATE / 'network-lease.dpapi').exists() and not any(map(port_open, ports))
         if clean:
             after = snapshot()
             if before == after:
@@ -61,7 +60,7 @@ def wait_clean(before, timeout=25):
             else:
                 stable = 0
         time.sleep(.25)
-    return {'ports_closed': not any(map(port_open, PORTS)),
+    return {'ports_closed': not any(map(port_open, ports)),
             'journal_removed': not (STATE / 'network-lease.dpapi').exists(),
             'proxy_restored': before['proxy'] == digest(WinInetProxy().read()),
             'foreign_interfaces_unchanged': before['foreign_interfaces'] == digest(foreign_snapshot())}
@@ -74,6 +73,7 @@ class Backend:
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, encoding='utf-8', env=environment,
                                         creationflags=subprocess.CREATE_NO_WINDOW)
+        self.ports = set()
         self.events = queue.Queue()
         def read():
             try:
@@ -100,6 +100,8 @@ class Backend:
                 value = self.events.get(timeout=max(.01, deadline - time.monotonic()))
             except queue.Empty:
                 raise TimeoutError('Test backend event timeout') from None
+            if value['event'] == 'started':
+                self.ports.update(value.get('ports', []))
             if value['event'] == '_eof':
                 raise RuntimeError('Test backend exited')
             if value['event'] == 'error' and value.get('operation') in ('start', '_restart', 'stop'):
@@ -158,6 +160,7 @@ def tun_transport():
 
 def exercise(profile, capture, before):
     checks = {}
+    ports = set()
     backend = None
     settings = dict(DEFAULTS, capture=capture, preset='all', auto_reconnect=True)
     try:
@@ -167,23 +170,19 @@ def exercise(profile, capture, before):
         started = backend.wait('started')
         checks['real_core_start'] = True
         identity = process_identity(started['pid'])
+        backend.send(action='check_sites')
+        checks['sites'] = backend.wait('sites_result')
         if capture == 'tun':
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                sites = pool.submit(check_connection, capture=capture)
-                socket_check = pool.submit(tun_transport)
-                checks['sites'] = sites.result()
-                checks['tun_socket'] = socket_check.result()
-        else:
-            checks['sites'] = check_connection()
+            checks['tun_socket'] = tun_transport()
         if capture == 'system':
-            checks['system_proxy_applied'] = WinInetProxy().read()['server'] == '127.0.0.1:11809'
+            checks['system_proxy_applied'] = WinInetProxy().read()['server'] == '127.0.0.1:%d' % started['endpoints']['http']['port']
         print('2/4: авария собственного ядра и автоподключение', flush=True)
         kill_owned_core(started['pid'], identity)
         restarted = backend.wait('started', predicate=lambda item: item.get('reconnected') is True)
         checks['core_crash_auto_reconnected'] = restarted['pid'] != started['pid']
         backend.send(action='stop')
         backend.wait('stopped', timeout=35)
-        checks['normal_stop'] = wait_clean(before)
+        checks['normal_stop'] = wait_clean(before, ports | backend.ports if backend else ports)
         if not all(checks['normal_stop'].values()):
             raise RuntimeError('Normal stop recovery incomplete')
         print('3/4: новый запуск и авария собственного сервиса', flush=True)
@@ -191,10 +190,11 @@ def exercise(profile, capture, before):
         backend.wait('started')
         backend.process.kill()
         backend.process.wait(timeout=5)
-        checks['owner_crash'] = wait_clean(before)
+        checks['owner_crash'] = wait_clean(before, ports | backend.ports if backend else ports)
         if not all(checks['owner_crash'].values()):
             raise RuntimeError('Crash recovery incomplete; do not start another capture')
         backend.close()
+        ports.update(backend.ports)
         backend = Backend()
         print('4/4: запуск после аварии, остановка и очистка', flush=True)
         backend.send(action='start', profile=profile, settings=settings)
@@ -207,7 +207,7 @@ def exercise(profile, capture, before):
     finally:
         if backend:
             backend.close()
-        checks['final_cleanup'] = wait_clean(before)
+        checks['final_cleanup'] = wait_clean(before, ports | backend.ports if backend else ports)
     return checks
 
 
@@ -221,7 +221,7 @@ def main():
     args = parser.parse_args()
     if args.exercise and args.capture != 'local' and not args.allow_network_changes:
         parser.error('system/tun exercise requires --allow-network-changes')
-    report = {'version': '0.4', 'capture': args.capture, 'exercise_requested': args.exercise,
+    report = {'version': VERSION, 'capture': args.capture, 'exercise_requested': args.exercise,
               'context': 'Standalone only when other_vpn and other_proxy are false', 'preflight': {}, 'checks': {}}
     preflight = report['preflight']
     try:
@@ -229,7 +229,6 @@ def main():
         preflight['admin'] = bool(ctypes.windll.shell32.IsUserAnAdmin())
         preflight['core_present'] = CORE.is_file()
         preflight['wintun_present'] = (CORE.parent / 'wintun.dll').is_file()
-        preflight['ports_free'] = not any(map(port_open, PORTS))
         preflight['journal_absent'] = not (STATE / 'network-lease.dpapi').exists()
         before = snapshot()
         preflight['network_snapshot_readable'] = True

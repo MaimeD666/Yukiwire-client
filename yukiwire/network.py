@@ -120,18 +120,12 @@ def running_process_names():
         api.CloseHandle(snapshot)
 
 
-def conflicts(proxy=None):
+def conflicts(proxy=None, own_proxy=None):
     proxy = proxy or WinInetProxy()
     state = proxy.read()
-    other_proxy = bool(state['flags'] & 2 and state['server'] and state['server'] != '127.0.0.1:11809') or bool(state['flags'] & 4 and state['pac'])
+    other_proxy = bool(state['flags'] & 2 and state['server'] and state['server'] != own_proxy) or bool(state['flags'] & 4 and state['pac'])
     other_tun, check_failed = False, False
-    try:
-        names = running_process_names()
-        other_tun = bool(names & {'nekoray.exe', 'nekobox.exe', 'nekobox_core.exe', 'sing-box.exe',
-                                 'mihomo.exe', 'clash.exe', 'clash-meta.exe', 'clash-verge.exe',
-                                 'v2rayn.exe', 'hiddify.exe'})
-    except Exception:
-        check_failed = True
+    # An idle VPN UI/process does not own the network. Inspect actual capture.
     try:
         from .windows_snapshot import foreign_capture_present
         other_tun = foreign_capture_present() or other_tun
@@ -146,11 +140,11 @@ class ProxyLease:
         self.journal = journal
         self.adapter = adapter or WinInetProxy()
 
-    def prepare(self, owner, core, tun=None):
+    def prepare(self, owner, core, tun=None, proxy_port=11809):
         original = self.adapter.read()
         if original['flags'] & 2 and original['server'] or original['flags'] & 4 and original['pac']:
             raise ValueError('Уже включён другой системный прокси/PAC. Yukiwire не будет заменять его. Выберите локальный режим.')
-        desired = {'flags': 1 | 2, 'server': '127.0.0.1:11809', 'bypass': '<local>;localhost;127.*;[::1]', 'pac': ''}
+        desired = {'flags': 1 | 2, 'server': '127.0.0.1:%d' % proxy_port, 'bypass': '<local>;localhost;127.*;[::1]', 'pac': ''}
         record = {'version': 1, 'lease_id': uuid.uuid4().hex, 'kind': 'proxy', 'owner': owner, 'core': core, 'original': original, 'desired': desired, 'phase': 'prepared'}
         if tun is not None:
             record.update(tun, kind='tun', system_proxy=True)
@@ -189,18 +183,18 @@ class NetworkGuard:
         self.kind = None
         self.lease_id = None
 
-    def arm(self, kind, pid, tun=None, system_proxy=False):
+    def arm(self, kind, pid, tun=None, system_proxy=False, proxy_port=11809):
         with journal_lock(self.journal.path):
-            self._arm(kind, pid, tun, system_proxy)
+            self._arm(kind, pid, tun, system_proxy, proxy_port)
 
-    def _arm(self, kind, pid, tun=None, system_proxy=False):
+    def _arm(self, kind, pid, tun=None, system_proxy=False, proxy_port=11809):
         if self.journal.path.exists():
             raise ValueError('Есть незавершённое восстановление сети. Откройте настройки безопасности.')
         if kind == 'system':
-            record = ProxyLease(self.journal).prepare(os.getpid(), pid)
+            record = ProxyLease(self.journal).prepare(os.getpid(), pid, proxy_port=proxy_port)
         elif kind == 'tun':
             if system_proxy:
-                record = ProxyLease(self.journal).prepare(os.getpid(), pid, tun=tun)
+                record = ProxyLease(self.journal).prepare(os.getpid(), pid, tun=tun, proxy_port=proxy_port)
             else:
                 record = {'version': 1, 'lease_id': uuid.uuid4().hex, 'kind': 'tun', 'owner': os.getpid(), 'core': pid, **tun}
         else:
@@ -288,8 +282,12 @@ def recover_journal(journal, expected_id=None, stale_only=False, cleanup_empty=F
             if identity is not None and (not record.get('owner_start') or identity == record['owner_start']):
                 return {'restored': False, 'conflict': True, 'reason': 'active_owner'}
         if record and record.get('kind') == 'tun' and not ctypes.windll.shell32.IsUserAnAdmin():
-            # Let the normal UI delegate recovery to its dedicated elevated helper.
-            return {'restored': False, 'conflict': False, 'requires_elevation': True}
+            # Native helper cleans privileged resources; normal Python restores only
+            # its user's proxy, after independently observing complete TUN cleanup.
+            if not record.get('protected_helper') or not tun_clean(record):
+                if record.get('system_proxy'):
+                    ProxyLease(journal).recover(remove_journal=False)
+                return {'restored': False, 'conflict': False, 'requires_elevation': True}
         result = _recover_journal(journal)
         if result.get('restored') and (record or cleanup_empty):
             unregister_recovery(journal.path)
@@ -311,12 +309,16 @@ def _recover_journal(journal):
         # Keep one durable lease until both capture paths have been recovered.
         # A newer proxy setting must survive, while our own TUN is still cleaned up.
         proxy_result = ProxyLease(journal).recover(remove_journal=False) if record.get('system_proxy') else None
-        script = RUNTIME / 'helpers' / 'recover-tun.ps1' if PORTABLE else ROOT / 'scripts' / 'recover-tun.ps1'
-        result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(script),
-                                 '-AdapterName', record['adapter'], '-Description', record['description']],
-                                capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
-        if result.returncode != 0:
-            raise RuntimeError('Не удалось убрать собственные маршруты TUN. Журнал сохранён для повторного восстановления.')
+        if record.get('protected_helper'):
+            if not tun_clean(record):
+                return {'restored': False, 'conflict': False, 'requires_elevation': True}
+        else:
+            script = RUNTIME / 'helpers' / 'recover-tun.ps1' if PORTABLE else ROOT / 'scripts' / 'recover-tun.ps1'
+            result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(script),
+                                     '-AdapterName', record['adapter'], '-Description', record['description']],
+                                    capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+            if result.returncode != 0:
+                raise RuntimeError('Не удалось убрать собственные маршруты TUN. Журнал сохранён для повторного восстановления.')
         if proxy_result and not proxy_result['restored']:
             return proxy_result
         journal.path.unlink(missing_ok=True)
@@ -366,11 +368,34 @@ def tun_ready(identity):
     return bool(inspect_tun('Ready', identity)['ready'])
 
 
-def add_tun(config, identity):
+def tun_clean(identity):
+    """Read-only confirmation; absence of capture alone is insufficient cleanup."""
+    import re
+    from .windows_snapshot import adapters, routes
+    name = identity.get('adapter', '')
+    if not re.fullmatch(r'Yukiwire-[0-9a-f]{12}', name) or identity.get('description') != 'Yukiwire ' + name[9:]:
+        raise ValueError('Неверная идентичность TUN в журнале.')
+    if identity.get('core_start') and process_identity(identity['core']) == identity['core_start']:
+        return False
+    matches = [item for item in adapters() if item['name'] == name]
+    if not matches:
+        return True
+    if len(matches) != 1 or matches[0]['description'] != identity['description'] + ' Tunnel':
+        raise ValueError('Идентичность адаптера TUN не совпадает; журнал сохранён.')
+    adapter = matches[0]
+    indexes = {adapter['index'], adapter['index6']} - {0}
+    owned = {'0.0.0.0/1', '128.0.0.0/1', '::/1', '8000::/1'}
+    return not (adapter['up'] or {'172.29.250.1/30', 'fd72:756b:6977::1/126'}.intersection(adapter['addresses'])
+                or '172.29.250.2' in adapter['dns']
+                or any(item['index'] in indexes and item['prefix'] in owned for item in routes()))
+
+
+def add_tun(config, identity, settings=None, direct_servers=None):
     primary = next((o for o in config['outbounds'] if o['protocol'] not in ('freedom', 'blackhole', 'dns', 'loopback')), None)
     if not primary or not primary.get('tag'):
         raise ValueError('Для TUN нужен основной outbound с тегом.')
-    config['dns'] = {'servers': ['https://1.1.1.1/dns-query'], 'tag': 'yukiwire-dns', 'queryStrategy': 'UseIP'}
+    from .dns_config import configure_tun_dns
+    configure_tun_dns(config, settings or {'dns': 'doh'}, primary['tag'], direct_servers)
     config['outbounds'].append({'tag': 'yukiwire-dns-out', 'protocol': 'dns'})
     config['routing']['rules'][0:0] = [
         {'type': 'field', 'inboundTag': ['yukiwire-dns'], 'outboundTag': primary['tag']},

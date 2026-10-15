@@ -7,7 +7,8 @@ from urllib.parse import urlsplit
 
 PRIVATE = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', '169.254.0.0/16', '::1/128', 'fc00::/7', 'fe80::/10']
 DEFAULTS = {'preset': 'ru-direct', 'direct': '', 'proxy': '', 'block': '', 'ru_ip': False, 'dns': 'system', 'auto_reconnect': True, 'capture': 'local',
-            'game_mode': False, 'game_processes': 'dota2.exe', 'tun_system_proxy': False, 'reconnect_on_change': False}
+            'game_mode': False, 'game_processes': 'dota2.exe', 'tun_system_proxy': False, 'reconnect_on_change': False,
+            'browser_home': 'about:blank', 'dns_direct': 'system', 'dns_vpn': 'https://1.1.1.1/dns-query', 'debug_logging': False, 'kill_switch': False}
 PRESETS = {'all', 'ru-direct', 'selected', 'original'}
 
 
@@ -69,16 +70,30 @@ def parse_game_processes(text):
     return processes
 
 
+def browser_home(value):
+    if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 32 for c in value):
+        raise ValueError('Некорректный адрес стартовой страницы.')
+    value = value.strip() or 'about:blank'
+    if value != 'about:blank':
+        url = urlsplit(value)
+        if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password:
+            raise ValueError('Стартовая страница: HTTP(S)-адрес или about:blank.')
+    return value
+
+
 def normalize_settings(settings):
     result = dict(DEFAULTS)
     result.update({k: v for k, v in settings.items() if k in DEFAULTS})
+    result['browser_home'] = browser_home(result['browser_home'])
+    from .dns_config import validate_resolvers
+    result['dns_direct'], result['dns_vpn'] = validate_resolvers(result['dns_direct'], result['dns_vpn'])
     if result['preset'] not in PRESETS or result['dns'] not in ('system', 'doh') or result['capture'] not in ('local', 'system', 'tun'):
         raise ValueError('Неизвестный режим настроек.')
     for key in ('direct', 'proxy', 'block'):
         if not isinstance(result[key], str) or len(result[key]) > 65536:
             raise ValueError('Слишком много правил.')
         parse_rules(result[key])
-    for key in ('ru_ip', 'auto_reconnect', 'game_mode', 'tun_system_proxy', 'reconnect_on_change'):
+    for key in ('ru_ip', 'auto_reconnect', 'game_mode', 'tun_system_proxy', 'reconnect_on_change', 'debug_logging', 'kill_switch'):
         if type(result[key]) is not bool:
             raise ValueError('Некорректное значение переключателя.')
     processes = parse_game_processes(result['game_processes'])
@@ -91,7 +106,7 @@ def normalize_settings(settings):
 def connection_settings(settings):
     """Only values that affect traffic; UI and recovery preferences apply immediately."""
     result = normalize_settings(settings)
-    for key in ('auto_reconnect', 'reconnect_on_change'):
+    for key in ('auto_reconnect', 'reconnect_on_change', 'browser_home', 'debug_logging'):
         result.pop(key)
     if result['preset'] != 'ru-direct':
         result['ru_ip'] = False
@@ -101,6 +116,13 @@ def connection_settings(settings):
         result['game_processes'] = ''
     if result['capture'] != 'tun':
         result['tun_system_proxy'] = False
+        result['dns_direct'] = 'system'
+    if result['capture'] == 'local':
+        result['kill_switch'] = False
+    if result['dns'] == 'doh':
+        result['dns_direct'] = 'system'
+    elif result['capture'] != 'tun' and not result['kill_switch']:
+        result['dns_vpn'] = DEFAULTS['dns_vpn']
     return result
 
 
@@ -166,7 +188,7 @@ def apply_routing(config, settings, tags=None):
         config['routing'] = {'domainStrategy': 'IPIfNonMatch' if settings['preset'] == 'ru-direct' and settings['ru_ip'] else 'AsIs',
                              'rules': build_rules(settings, tags, proxy_tag, 'yukiwire-direct', 'yukiwire-block')}
     if settings['dns'] == 'doh':
-        config['dns'] = {'servers': ['https://1.1.1.1/dns-query'], 'queryStrategy': 'UseIP', 'tag': 'yukiwire-dns'}
+        config['dns'] = {'servers': [settings['dns_vpn']], 'queryStrategy': 'UseIP', 'tag': 'yukiwire-dns'}
         primary = next((o for o in config['outbounds'] if o['protocol'] not in ('freedom', 'blackhole', 'dns', 'loopback')), config['outbounds'][0])
         if not primary.get('tag'):
             raise ValueError('Для DoH назначьте тег главному outbound в исходном JSON.')

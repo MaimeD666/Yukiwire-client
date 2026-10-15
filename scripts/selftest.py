@@ -63,7 +63,7 @@ def main():
         checks['real_core_start'] = True
         checks['https'] = probe_record()
         session.stop()
-        checks['normal_stop_closes_port'] = wait_closed(11809)
+        checks['normal_stop_closes_port'] = wait_closed(session.endpoints['http'].port)
         checks['profile_not_written_to_disk'] = set((ROOT / 'runtime').rglob('*.json')) == files_before
         try:
             session.probe()
@@ -102,7 +102,7 @@ def main():
                 checks['owner_crash_kills_core'] = api.WaitForSingleObject(handle, 5000) == 0
             finally:
                 api.CloseHandle(handle)
-            checks['owner_crash_closes_port'] = wait_closed(11809)
+            checks['owner_crash_closes_port'] = wait_closed(started['endpoints']['http']['port'])
             checks['crash_does_not_leave_profile'] = set((ROOT / 'runtime').rglob('*.json')) == files_before
         finally:
             if child.poll() is None:
