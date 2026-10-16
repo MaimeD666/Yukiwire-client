@@ -15,6 +15,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+if os.environ.get('YUKIWIRE_ACCEPTANCE_BUNDLE'):
+    sys.path.insert(0, os.environ['YUKIWIRE_ACCEPTANCE_BUNDLE'])
 
 
 def require_disposable_runner():

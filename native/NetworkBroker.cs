@@ -97,10 +97,12 @@ namespace Yukiwire {
    if (lookup == 87) return true; // ERROR_INVALID_PARAMETER: no such valid alias.
    if (lookup != 0) return false;
    string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");
-   var info = new ProcessStartInfo(powershell,"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + Path.Combine(ProtectedStorage.DirectoryPath,"recover-tun.ps1") + "\" -AdapterName " + name + " -Description \"" + desc + "\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = ProtectedStorage.DirectoryPath, RedirectStandardOutput = true, RedirectStandardError = true };
+   var info = new ProcessStartInfo(powershell,"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + Path.Combine(ProtectedStorage.DirectoryPath,"recover-tun.ps1") + "\" -AdapterName " + name + " -Description \"" + desc + "\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = ProtectedStorage.DirectoryPath, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
    CleanEnvironment(info);
    cleanupStage = 0; cleanupExit = 0;
    using (var process = Process.Start(info)) {
+    // A GUI/UAC parent has no usable console input. Never inherit its stdin.
+    process.StandardInput.Close();
     process.OutputDataReceived += delegate(object sender,DataReceivedEventArgs entry) {
      if (entry.Data != null && Regex.IsMatch(entry.Data,@"^YUKIWIRE_CLEANUP_STAGE:[1-6]$")) cleanupStage = entry.Data[entry.Data.Length - 1] - '0';
     };

@@ -1,11 +1,14 @@
 """Opt-in UAC/installation/IPC test. Never sends start or creates a TUN adapter."""
 import argparse
+import os
 from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'scripts'))
+if os.environ.get('YUKIWIRE_ACCEPTANCE_BUNDLE'):
+    sys.path.insert(0, os.environ['YUKIWIRE_ACCEPTANCE_BUNDLE'])
 
 
 def verify():
@@ -22,8 +25,9 @@ def verify():
     import json
     import time
 
-    print('Building protected component...', flush=True)
-    build()
+    if not os.environ.get('YUKIWIRE_ACCEPTANCE_BUNDLE'):
+        print('Building protected component...', flush=True)
+        build()
     before_proxy = WinInetProxy().read()
     before_adapters = adapters()
     before_routes = routes()

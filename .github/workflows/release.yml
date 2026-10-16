@@ -13,7 +13,10 @@ jobs:
   build:
     uses: ./.github/workflows/check.yml
   network:
+    needs: build
     uses: ./.github/workflows/network-acceptance.yml
+    with:
+      artifact_name: yukiwire-windows
   publish:
     needs: [build, network]
     runs-on: ubuntu-latest
