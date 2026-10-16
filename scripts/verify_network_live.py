@@ -162,7 +162,9 @@ def verify():
             print('Real capture: %s, combined=%s, protection=%s' % (capture, combined, protection), flush=True)
             assert direct_tcp(), 'Baseline internet must be reachable before protection'
             session = Session()
+            existing_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
+                assert udp_dns(*udp_destinations[0], connection=existing_udp), 'Existing UDP baseline failed'
                 session.start(profile, dict(DEFAULTS, capture=capture, tun_system_proxy=combined,
                                             kill_switch=protection, preset='all', auto_reconnect=False))
                 print('Capture started.', flush=True)
@@ -182,6 +184,7 @@ def verify():
                     if capture == 'system':
                         assert not direct_tcp(), 'Direct traffic bypassed protection'
                         blocked_udp(udp_destinations)
+                        assert not udp_dns(*udp_destinations[0], connection=existing_udp), 'Existing UDP flow bypassed protection'
                     core = session.core.process
                     terminate_owned(core.pid, core.started)
                     wait_for(lambda: core.poll() is not None, 'Core exit was not reported')
@@ -189,6 +192,7 @@ def verify():
                     assert session.protection.active
                     assert not direct_tcp(), 'Traffic leaked after core death'
                     blocked_udp(udp_destinations)
+                    assert not udp_dns(*udp_destinations[0], connection=existing_udp), 'Existing UDP flow survived core death'
                     session.protection.release(session.broker)
                     wait_for(direct_tcp, 'Explicit protection release did not restore network')
                     for destination in udp_destinations:
@@ -200,6 +204,7 @@ def verify():
                 assert not (STATE / 'network-lease.dpapi').exists()
                 print('Capture, traffic counters, stop/recovery: passed', flush=True)
             finally:
+                existing_udp.close()
                 try:
                     session.stop()
                 finally:
