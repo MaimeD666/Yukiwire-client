@@ -22,4 +22,6 @@ jobs:
       - run: python scripts/download_core.py
       - run: python scripts/download_wintun.py
       - name: Protected production helper, prepare/stop and EOF
-        run: python -u scripts/verify_network_component.py --install
+        run: python -c "import subprocess; subprocess.run(['python', '-u', 'scripts/verify_network_component.py', '--install'], check=True, timeout=150)"
+      - name: Real TUN, combined proxy, persistent WFP and recovery
+        run: python -u scripts/verify_network_live.py

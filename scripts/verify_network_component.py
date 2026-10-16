@@ -22,6 +22,7 @@ def verify():
     import json
     import time
 
+    print('Building protected component...', flush=True)
     build()
     before_proxy = WinInetProxy().read()
     before_adapters = adapters()
@@ -33,10 +34,13 @@ def verify():
     config = configure_local(config, endpoints, settings)
     config = diagnostic_config(enable_metrics(config, endpoints['metrics']), endpoints['probe'])
     config = add_tun(config, dict(adapter='Yukiwire-000000000000', description='Yukiwire 000000000000'))
+    print('Installing/connecting protected helper...', flush=True)
     broker = Broker()
+    print('Production IPC connected.', flush=True)
     pending = None
     try:
         for attempt in range(2):
+            print('Preparing core, attempt %d...' % (attempt + 1), flush=True)
             pending = broker.request('prepare', config=json.dumps(config), assets=str(RUNTIME))
             assert process_identity(pending['pid']) == pending['core_start'], 'Prepared core identity mismatch'
             assert pending['adapter'] != 'Yukiwire-000000000000', 'Helper must choose its own adapter identity'
@@ -46,6 +50,7 @@ def verify():
             assert WinInetProxy().read() == before_proxy, 'Proxy changed before configuration was supplied'
             assert adapters() == before_adapters and routes() == before_routes, 'Network changed during prepare'
             broker.request('stop', serial=pending['serial'])
+            print('Prepared core stopped.', flush=True)
             assert process_identity(pending['pid']) != pending['core_start'], 'Core survived stop'
         pending = broker.request('prepare', config=json.dumps(config), assets=str(RUNTIME))
     finally:
