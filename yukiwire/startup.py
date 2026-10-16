@@ -13,7 +13,9 @@ def specification(path, command, kind=None):
     suffix = hashlib.sha256(str(Path(path).resolve()).lower().encode()).hexdigest()[:20]
     return {'name': 'Yukiwire.Recovery-' + suffix, 'executable': command[0],
             'arguments': subprocess.list2cmdline(command[1:]), 'directory': str(ROOT),
-            'level': 'Highest' if kind == 'tun' else 'Limited'}
+            # Never persist an elevated launch of user-writable Python/code.
+            # A remaining TUN lease is recovered through the explicit UAC path.
+            'level': 'Limited'}
 
 
 def task(mode, spec):

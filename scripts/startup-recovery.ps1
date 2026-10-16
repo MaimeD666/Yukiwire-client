@@ -1,7 +1,7 @@
 param([ValidateSet('Register','Remove')][string]$Mode, [Parameter(Mandatory=$true)][string]$PayloadB64)
 $ErrorActionPreference = 'Stop'
 $spec = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($PayloadB64)) | ConvertFrom-Json
-if ($spec.name -notmatch '^Yukiwire\.Recovery-[0-9a-f]{20}$' -or $spec.level -notin @('Limited','Highest')) { throw 'Invalid task identity' }
+if ($spec.name -notmatch '^Yukiwire\.Recovery-[0-9a-f]{20}$' -or $spec.level -ne 'Limited') { throw 'Invalid task identity' }
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $marker = 'Yukiwire temporary network recovery ' + $spec.name
 $existing = Get-ScheduledTask -TaskPath '\' -ErrorAction Stop | Where-Object { $_.TaskName -eq $spec.name }

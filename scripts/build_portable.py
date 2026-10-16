@@ -13,8 +13,11 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
+sys.path.insert(0, str(ROOT))
+from yukiwire.version import VERSION, PACKAGE_NAME
 from build_native import build
 from download_python import install as install_python
+from download_rules import install as install_rules
 
 EXCLUDED_LIBRARY = {'site-packages', '__pycache__', 'test', 'tests', 'tkinter', 'idlelib',
                     'ensurepip', 'venv', 'turtledemo'}
@@ -106,17 +109,18 @@ def main():
         if not (core / name).is_file():
             raise RuntimeError('Missing core asset: ' + name + '; run the matching download script')
     shell = build()
+    rules = install_rules()
     (ROOT / 'build').mkdir(exist_ok=True)
     dist = ROOT / 'dist'
     dist.mkdir(exist_ok=True)
     suffix = '-local' if args.without_tun else ''
-    archive_path = dist / ('Yukiwire-0.4-win-x64' + suffix + '.zip')
+    archive_path = dist / (PACKAGE_NAME + suffix + '.zip')
     with tempfile.TemporaryDirectory(prefix='portable-', dir=ROOT / 'build') as temporary:
         generated = Path(temporary)
         allowed = {'Yukiwire.exe': shell, 'README.md': ROOT / 'README.md',
                    'THIRD_PARTY.md': ROOT / 'THIRD_PARTY.md',
                    'licenses/OpenSSL-LICENSE.txt': ROOT / 'third_party' / 'licenses' / 'OpenSSL-LICENSE.txt'}
-        for name in ('Loyalsoldier-LICENSE.txt', 'Geoip-LICENSE.txt', 'Geosite-LICENSE.txt'):
+        for name in ('Loyalsoldier-LICENSE.txt', 'Geoip-LICENSE.txt', 'Geosite-LICENSE.txt', 'jsQR-LICENSE.txt', 'Ru-rules-LICENSE.txt'):
             allowed['licenses/' + name] = ROOT / 'third_party' / 'licenses' / name
         if args.installed_python:
             allowed.update(python_assets(Path(sys.base_prefix), generated))
@@ -129,7 +133,7 @@ def main():
         allowed['licenses/WebView2-LICENSE.txt'] = ROOT / 'runtime' / 'webview' / 'LICENSE.txt'
         for name in ('index.html', 'styles.css', 'app.js'):
             allowed['ui/' + name] = ROOT / 'ui' / name
-        for name in ('yukiwire.ico', 'icon.svg'):
+        for name in ('yukiwire.ico', 'icon.svg', 'jsQR.js'):
             allowed['ui/assets/' + name] = ROOT / 'ui' / 'assets' / name
         for source in sorted((ROOT / 'yukiwire').glob('*.py')):
             allowed['yukiwire/' + source.name] = source
@@ -140,13 +144,18 @@ def main():
             allowed['helpers/' + name] = ROOT / 'scripts' / name
         for name in names:
             allowed['core/' + name] = core / name
+        for name in ('geoip.dat', 'geosite.dat', 'rules.json'):
+            allowed['core/' + name] = rules / name
+        if not args.without_tun:
+            for name in ('Yukiwire.Network.Setup.exe', 'component.json'):
+                allowed['network/' + name] = ROOT / 'runtime/network' / name
         for name in ('technical-test.cmd',):
             if (ROOT / name).is_file():
                 allowed[name] = ROOT / name
-        write_archive(archive_path, allowed, {'version': '0.4', **interpreter,
+        write_archive(archive_path, allowed, {'version': VERSION, **interpreter,
                                             'core': 'v26.9.30', 'tun_available': not args.without_tun})
     # Extract into a new directory: rebuilding never overwrites someone's saved state.
-    destination = Path(tempfile.mkdtemp(prefix='Yukiwire-0.4-', dir=dist))
+    destination = Path(tempfile.mkdtemp(prefix='Yukiwire-' + VERSION + '-', dir=dist))
     with zipfile.ZipFile(archive_path) as archive:
         archive.extractall(destination)
     print('Archive: ' + str(archive_path))

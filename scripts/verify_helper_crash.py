@@ -9,14 +9,12 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from build_native import build
-from scripts.acceptance import PORTS, port_open, snapshot, wait_clean, kill_owned_core
+from scripts.acceptance import snapshot, wait_clean, kill_owned_core
 from yukiwire.network import process_identity
 
 
 def main():
-    if any(map(port_open, PORTS)):
-        raise RuntimeError('Close Yukiwire before testing IPC crash cleanup')
-    executable = build()
+    executable = build(test=True)
     fixture = ROOT / 'runtime' / 'public-native-fixture.txt'
     fixture.write_text('vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls')
     ready = executable.parent / 'native-crash-ready.json'
@@ -28,12 +26,14 @@ def main():
         ready.unlink(missing_ok=True)
         host = subprocess.Popen([str(executable), '--integration-worker-crash', str(fixture)],
                                 cwd=ROOT, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+        ports = []
         try:
             deadline = time.monotonic() + 30
             while not ready.is_file() and time.monotonic() < deadline and host.poll() is None:
                 time.sleep(.1)
             assert ready.is_file(), 'Owned helper did not start the test core'
             details = json.loads(ready.read_text())
+            ports = details['ports']
             assert details['host_pid'] == host.pid
             core_identity = process_identity(details['core_pid'])
             assert core_identity is not None
@@ -45,7 +45,7 @@ def main():
                 helper_identity = process_identity(details['worker_pid'])
                 assert helper_identity is not None
                 kill_owned_core(details['worker_pid'], helper_identity)
-            cleanup = wait_clean(before)
+            cleanup = wait_clean(before, ports)
             assert all(cleanup.values()), cleanup
             assert process_identity(details['core_pid']) != core_identity, 'Owned core survived IPC owner death'
             reports.append({'target': target, 'cleanup': cleanup, 'owned_core_closed': True})
@@ -54,7 +54,7 @@ def main():
             if host.poll() is None:
                 host.kill()
                 host.wait(timeout=5)
-            assert all(wait_clean(before).values()), 'Final IPC test cleanup incomplete'
+            assert all(wait_clean(before, ports).values()), 'Final IPC test cleanup incomplete'
     (ROOT / 'runtime' / 'helper-crash-report.json').write_text(json.dumps(reports, indent=2))
 
 

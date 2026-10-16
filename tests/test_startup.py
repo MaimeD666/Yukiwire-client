@@ -18,7 +18,7 @@ class StartupTests(unittest.TestCase):
         self.assertRegex(proxy['name'], r'^Yukiwire\.Recovery-[0-9a-f]{20}$')
         self.assertEqual(proxy['name'], tun['name'])
         self.assertEqual(proxy['level'], 'Limited')
-        self.assertEqual(tun['level'], 'Highest')
+        self.assertEqual(tun['level'], 'Limited')
         self.assertEqual(proxy['arguments'], subprocess.list2cmdline(command[1:]))
 
     def test_different_installations_have_different_task_names(self):

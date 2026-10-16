@@ -9,16 +9,14 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from build_native import build
-from scripts.acceptance import PORTS, port_open, snapshot, wait_clean
+from scripts.acceptance import snapshot, wait_clean
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--saved', action='store_true', help='Exercise the actual saved profile, local mode only')
     args = parser.parse_args()
-    if any(map(port_open, PORTS)):
-        raise RuntimeError('Close Yukiwire before native integration')
-    executable = build()
+    executable = build(test=True)
     fixture = ROOT / 'runtime' / 'public-native-fixture.txt'
     fixture.write_text('vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls')
     embedded = ROOT / 'runtime' / 'embedded-python' / 'python.exe'
@@ -41,7 +39,7 @@ def main():
             assert report['network_response_received'], 'Real saved-profile HTTPS probe failed'
         if mode in ('--integration-renderer', '--integration-browser'):
             assert report['renderer_recovered_without_core_restart'], 'Renderer recovery interrupted the core'
-        clean = wait_clean(before)
+        clean = wait_clean(before, report['ports'])
         assert all(clean.values()), clean
         reports.append({'mode': mode, **report, 'cleanup': clean})
         print(mode + ': actual UI click, service/core start, response, UI stop and network preservation passed')

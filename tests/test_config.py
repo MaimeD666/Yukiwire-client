@@ -1,7 +1,7 @@
 import json
 import base64
 import unittest
-from yukiwire.config import build_config
+from yukiwire.config import build_config, profile_warnings
 
 
 class ConfigTests(unittest.TestCase):
@@ -52,9 +52,62 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_config('vless://invalid@192.0.2.1:443')
 
+    def test_panel_defaults_and_unknown_metadata_are_compatible(self):
+        profile = 'vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls&headerType=none&private-metadata=do-not-log'
+        _, config = build_config(profile)
+        self.assertFalse(config['outbounds'][0]['streamSettings']['tlsSettings']['allowInsecure'])
+        warning = ' '.join(profile_warnings(profile))
+        self.assertTrue(warning)
+        self.assertNotIn('private-metadata', warning)
+        self.assertNotIn('do-not-log', warning)
+
+    def test_trojan_peer_alias_and_false_insecure_option(self):
+        _, config = build_config('trojan://password@192.0.2.1:443?peer=tls.example&allowInsecure=0')
+        tls = config['outbounds'][0]['streamSettings']['tlsSettings']
+        self.assertEqual(tls['serverName'], 'tls.example')
+        self.assertFalse(tls['allowInsecure'])
+
+    def test_link_cannot_silently_disable_tls_verification(self):
+        with self.assertRaisesRegex(ValueError, 'TLS'):
+            build_config('trojan://password@192.0.2.1:443?allowInsecure=1')
+
+    def test_httpupgrade_preserves_host_and_path(self):
+        _, config = build_config('trojan://password@192.0.2.1:443?type=httpupgrade&host=cdn.example&path=%2Fupgrade')
+        stream = config['outbounds'][0]['streamSettings']
+        self.assertEqual(stream['httpupgradeSettings'], {'host': 'cdn.example', 'path': '/upgrade'})
+
+    def test_reality_requires_key_and_preserves_post_quantum_verification(self):
+        profile = 'vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=reality'
+        with self.assertRaisesRegex(ValueError, 'pbk'):
+            build_config(profile)
+        _, config = build_config(profile + '&pbk=test-key&pqv=test-verification')
+        self.assertEqual(config['outbounds'][0]['streamSettings']['realitySettings']['mldsa65Verify'], 'test-verification')
+
+    def test_ambiguous_security_parameters_are_rejected(self):
+        with self.assertRaises(ValueError):
+            build_config('trojan://password@192.0.2.1:443?security=tls&security=none')
+
     def test_incompatible_json(self):
         with self.assertRaises(ValueError):
             build_config('{"proxies": []}')
+
+    def test_hysteria2_preserves_auth_ipv6_sni_and_obfuscation(self):
+        name, config = build_config('hy2://user%3Apass@[2001:db8::1]:8443?sni=server.example.com&obfs=salamander&obfs-password=fixture#Hysteria')
+        outbound = config['outbounds'][0]
+        self.assertEqual(name, 'Hysteria')
+        self.assertEqual(outbound['settings'], {'version': 2, 'address': '2001:db8::1', 'port': 8443})
+        self.assertEqual(outbound['streamSettings']['hysteriaSettings']['auth'], 'user:pass')
+        self.assertEqual(outbound['streamSettings']['finalmask']['udp'][0]['settings']['password'], 'fixture')
+        for suffix in ('?insecure=1', '?pinSHA256=bad', '?obfs=unknown', '?obfs=salamander'):
+            with self.assertRaises(ValueError): build_config('hy2://fixture@192.0.2.1' + suffix)
+
+    def test_wireguard_is_forced_to_userspace_and_h2_is_explicitly_rejected(self):
+        _, config = build_config('{"outbounds":[{"protocol":"wireguard","settings":{}}]}')
+        self.assertTrue(config['outbounds'][0]['settings']['noKernelTun'])
+        with self.assertRaises(ValueError):
+            build_config('{"outbounds":[{"protocol":"wireguard","settings":{"noKernelTun":false}}]}')
+        with self.assertRaisesRegex(ValueError, 'H2'):
+            build_config('trojan://fixture@192.0.2.1:443?type=h2')
 
     def test_system_interface_outbound_is_rejected(self):
         with self.assertRaises(ValueError):

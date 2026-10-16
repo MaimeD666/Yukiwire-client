@@ -47,7 +47,7 @@ def verify():
         if not job or not kernel.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
             raise RuntimeError('Cannot guard the test browser')
         session.start('vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls', dict(DEFAULTS, auto_reconnect=False))
-        args = command(browser_path(), Path(temporary.name))[:-1] + [
+        args = command(browser_path(), Path(temporary.name), session.endpoints['http'].port)[:-1] + [
             '--proxy-bypass-list=<-loopback>', '--headless=new', '--dump-dom', '--disable-gpu', '--enable-logging=stderr',
             '--disable-background-networking', 'http://127.0.0.1:%s/' % fixture.server_port]
         process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

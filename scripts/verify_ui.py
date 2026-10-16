@@ -170,6 +170,36 @@ def main():
             page.locator('#profile-search').fill('not-found')
             expect(page.locator('.empty-state')).to_contain_text('Ничего не нашлось')
             page.locator('#profile-search').fill('')
+            if width == 1120:
+                page.locator('.route-details > summary').click()
+                page.locator('#subscription-name').fill('Public fixture')
+                page.locator('#subscription-url').fill('https://example.com/test-subscription-token')
+                page.locator('#subscription-submit').click()
+                assert page.evaluate('commands.at(-1).action') == 'update_subscription'
+                emit(page, 'subscription_updating')
+                expect(page.locator('#subscription-submit')).to_be_disabled()
+                emit(page, 'profiles', profiles=library, selected='fixture', subscriptions=[dict(id='subscription', name='Public fixture', updated=1)])
+                emit(page, 'subscription_updated', count=2)
+                expect(page.locator('#subscription-url')).to_have_value('')
+                expect(page.locator('#subscription-list')).not_to_contain_text('test-subscription-token')
+                page.locator('#check-profiles').click()
+                assert page.evaluate('commands.at(-1).action') == 'check_profiles'
+                emit(page, 'profiles_checking')
+                emit(page, 'profile_latency', profile_id='fixture', elapsed_ms=200)
+                emit(page, 'profile_latency', profile_id='backup', elapsed_ms=80)
+                emit(page, 'profiles_checked')
+                page.locator('#sort-profiles').check()
+                expect(page.locator('.profile-choice').first).to_contain_text('Запасной')
+                page.locator('#sort-profiles').uncheck()
+                page.locator('.route-details > summary').click()
+                page.locator('#add-profile').click()
+                with page.expect_file_chooser() as chooser:
+                    page.locator('#import-qr').click()
+                chooser.value.set_files(ROOT / 'tests/fixtures/profile-qr.png')
+                expect(page.locator('#edit-profile')).to_have_value(PROFILE)
+                assert page.evaluate('commands.at(-1).action') == 'check_profiles', 'Reading QR must not save or connect'
+                assert 'test-subscription-token' not in page.evaluate('JSON.stringify(localStorage)')
+                page.locator('#cancel-editor').click()
             page.locator('.delete-profile').last.click()
             expect(page.locator('#confirm-dialog')).to_be_visible()
             expect(page.locator('#confirm-cancel')).to_be_focused()
@@ -233,8 +263,7 @@ def main():
             expect(page.locator('#tun-proxy-option')).to_be_hidden()
             expect(page.locator('[name=tun_system_proxy]')).to_be_checked()
             page.evaluate("Object.defineProperty(navigator.clipboard, 'writeText', {value: async text => {window.copiedAddress=text}})")
-            page.locator('#settings-form [data-copy="127.0.0.1:11809"]').click()
-            assert page.evaluate('window.copiedAddress') == '127.0.0.1:11809'
+            expect(page.locator('#settings-form [data-endpoint=http]')).to_be_disabled()
             page.locator('select[name=dns]').select_option('doh')
             open_page(page, 'routing')
             expect(page.locator('textarea[name=proxy]')).to_have_value('chatgpt.com\nopenai.com')
@@ -405,6 +434,12 @@ def main():
             assert page.locator('#home-profile img').count() == 0
             assert page.locator('#profile-list img').count() == 0
             home(page)
+            emit(page, 'stopped', network_blocked=True)
+            expect(page.locator('#protection-notice')).to_be_visible()
+            page.locator('#protection-notice button').click()
+            assert page.evaluate('commands.at(-1).action') == 'stop', 'Protection must be releasable without a running core'
+            emit(page, 'stopped', network_blocked=False)
+            expect(page.locator('#protection-notice')).to_be_hidden()
             emit(page, 'service_exited')
             expect(page.locator('#connect-button')).to_be_disabled()
             expect(page.locator('#connection-title')).to_have_text('Сервис недоступен')

@@ -74,6 +74,9 @@ class RuleSets:
 
     def metadata(self):
         if not self.active.exists():
+            bundled = CORE.parent / 'rules.json'
+            if bundled.exists():
+                return json.loads(bundled.read_text(encoding='utf-8'))
             return {'version': 'Встроенные списки Xray', 'source': 'XTLS/Xray-core', 'updated': None, 'custom': False}
         manifest = json.loads(self.active.read_text(encoding='utf-8'))
         if manifest.get('custom') and not re.fullmatch(r'[0-9a-f]{40}', manifest.get('commit', '')):
@@ -101,12 +104,12 @@ class RuleSets:
         return result
 
     def verify(self, manifest):
-        if not manifest.get('custom'):
+        if not manifest.get('custom') and not manifest.get('sha256'):
             return
         hashes = manifest.get('sha256', {})
         if set(hashes) != {'geoip.dat', 'geosite.dat'}:
             raise ValueError('В версии списков отсутствуют контрольные суммы.')
-        folder = self.directory / manifest['commit']
+        folder = self.directory / manifest['commit'] if manifest.get('custom') else CORE.parent
         for name, digest in hashes.items():
             if not (folder / name).is_file() or hashlib.sha256((folder / name).read_bytes()).hexdigest() != digest:
                 raise ValueError('Активные списки повреждены. Выполните откат или повторное обновление.')
@@ -137,7 +140,11 @@ class RuleSets:
         for name in ('geosite.dat', 'geoip.dat'):
             if name not in blobs:
                 raise ValueError('В версии отсутствуют geo-файлы.')
-            data = download('https://raw.githubusercontent.com/' + REPO + '/' + commit + '/' + name, proxy_port, 128 * 1024 * 1024)
+            try:
+                data = download('https://raw.githubusercontent.com/' + REPO + '/' + commit + '/' + name, proxy_port, 128 * 1024 * 1024)
+            except (OSError, ValueError, http.client.HTTPException):
+                # Immutable commit path; the same reviewed Git blob check below applies.
+                data = download('https://cdn.jsdelivr.net/gh/' + REPO + '@' + commit + '/' + name, proxy_port, 128 * 1024 * 1024)
             blob = hashlib.sha1(('blob %s\0' % len(data)).encode() + data).hexdigest()
             if blob != blobs[name]:
                 raise ValueError('Содержимое списка не совпало с Git blob. Обновление отменено.')
@@ -164,9 +171,11 @@ class RuleSets:
             raise ValueError('Предыдущей версии списков пока нет.')
         previous = json.loads(path.read_text())
         if not previous.get('custom'):
+            self.verify(previous)
             tags = {}
-            if (CORE.parent / 'geosite.dat').exists() and 'category-ru' in read_tags(CORE.parent / 'geosite.dat'):
-                tags['category-ru'] = 'geosite:category-ru'
+            if (CORE.parent / 'geosite.dat').exists():
+                available = read_tags(CORE.parent / 'geosite.dat')
+                tags.update({name: 'geosite:' + name for name in ('category-ru', 'ru-blocked', 'ru-available-only-inside') if name in available})
             if (CORE.parent / 'geoip.dat').exists() and 'ru' in read_tags(CORE.parent / 'geoip.dat'):
                 tags['geoip-ru'] = 'geoip:ru'
             validate(tags)
@@ -257,7 +266,7 @@ def match_ip(path, name, address):
 
 def download(url, proxy_port, limit):
     parsed = urlsplit(url)
-    if parsed.scheme != 'https' or parsed.hostname not in ('api.github.com', 'raw.githubusercontent.com'):
+    if parsed.scheme != 'https' or parsed.hostname not in ('api.github.com', 'raw.githubusercontent.com', 'cdn.jsdelivr.net'):
         raise ValueError('Недопустимый источник списков.')
     host = '127.0.0.1' if proxy_port else parsed.hostname
     port = proxy_port if proxy_port else 443

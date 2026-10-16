@@ -6,7 +6,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.acceptance import Backend, PORTS, kill_owned_core, port_open, snapshot, wait_clean
+from scripts.acceptance import Backend, kill_owned_core, snapshot, wait_clean
 from yukiwire.network import process_identity
 from yukiwire.paths import RUNTIME, STATE
 from yukiwire.storage import ProfileStore, atomic_write
@@ -18,7 +18,7 @@ def main():
     args = parser.parse_args()
     if args.minutes < 1 or args.minutes > 120:
         parser.error('Use 1–120 minutes')
-    if any(map(port_open, PORTS)) or (STATE / 'network-lease.dpapi').exists():
+    if (STATE / 'network-lease.dpapi').exists():
         raise RuntimeError('Close Yukiwire before the soak check')
     store = ProfileStore()
     profile = store.get(store.public()['selected'])['text']
@@ -47,7 +47,7 @@ def main():
         backend.wait('stopped')
     finally:
         backend.close()
-        report['cleanup'] = wait_clean(before)
+        report['cleanup'] = wait_clean(before, backend.ports)
         report['passed'] = report['probes'] > 0 and not report['https_failures'] and report['restart_verified'] and all(report['cleanup'].values())
         atomic_write(RUNTIME / 'soak-report.json', json.dumps(report, indent=2).encode())
     print('Soak passed:', report['passed'])

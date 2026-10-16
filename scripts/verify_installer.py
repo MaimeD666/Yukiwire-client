@@ -82,7 +82,13 @@ def main():
             run([uninstaller, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], success=False)
             assert journal.exists() and (target / 'Yukiwire.exe').exists()
             journal.unlink()
-            mutex = kernel.CreateMutexW(None, False, 'Local\\Yukiwire.NativeShell')
+            protection = target / 'state/kill-switch.dpapi'
+            protection.write_bytes(b'installer-test-persistent-protection')
+            run(command, success=False)
+            run([uninstaller, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], success=False)
+            assert protection.exists() and (target / 'Yukiwire.exe').exists()
+            protection.unlink()
+            mutex = kernel.CreateMutexW(None, False, 'Local\\Yukiwire.InstallerTest.NativeShell')
             if not mutex:
                 raise ctypes.WinError(ctypes.get_last_error())
             try:

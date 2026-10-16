@@ -86,7 +86,7 @@ class HealthTests(unittest.TestCase):
             connection.getresponse.return_value.status = 200
             result = probe_https(port=11809, host='example.com')
             self.assertEqual(factory.call_args.args, ('127.0.0.1', 11809))
-            connection.set_tunnel.assert_called_once_with('example.com', 443)
+            connection.set_tunnel.assert_called_once_with('example.com', 443, headers={})
             args, kwargs = connection.request.call_args
             self.assertEqual(args, ('GET', '/'))
             self.assertEqual(kwargs['headers']['Host'], 'example.com')
