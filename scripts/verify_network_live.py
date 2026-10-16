@@ -116,6 +116,9 @@ def verify():
         port = reservation.getsockname()[1]
     peer = CoreProcess(executable, {
         'log': {'loglevel': 'warning'},
+        # The synthetic remote peer runs on this VM too. Resolve in its own
+        # permitted core, not through Windows DNS blocked by the client policy.
+        'dns': {'servers': ['1.1.1.1'], 'queryStrategy': 'UseIPv4'},
         'inbounds': [{'listen': '127.0.0.1', 'port': port, 'protocol': 'vless',
                       'settings': {'decryption': 'none', 'clients': [{'id': '00000000-0000-4000-8000-000000000001'}]}}],
         'outbounds': [{'protocol': 'freedom', 'settings': {'domainStrategy': 'UseIPv4'},

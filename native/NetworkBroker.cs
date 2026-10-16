@@ -105,7 +105,9 @@ namespace Yukiwire {
     if (new FileInfo(path).Length > 4096) throw new InvalidOperationException("Invalid recovery record");
     var record = NetworkPolicy.Map(NetworkPolicy.Json.DeserializeObject(File.ReadAllText(path,Encoding.UTF8)));
     if (StringOf(record,"sid") != ownerSid) continue;
-    if (Alive(Convert.ToInt32(record["owner"]),Convert.ToInt64(record["owner_start"])) || Alive(Convert.ToInt32(record["core"]),Convert.ToInt64(record["core_start"]))) continue;
+    if (Alive(Convert.ToInt32(record["core"]),Convert.ToInt64(record["core_start"]))) continue;
+    bool sameOwner = Convert.ToInt32(record["owner"]) == parent.Id && Convert.ToInt64(record["owner_start"]) == ownerStart;
+    if (!sameOwner && Alive(Convert.ToInt32(record["owner"]),Convert.ToInt64(record["owner_start"]))) continue;
     if (!record.ContainsKey("tun") || !Object.Equals(record["tun"],false)) {
      if (!CleanupAdapter(StringOf(record,"adapter"),StringOf(record,"description"))) throw new InvalidOperationException("Recovery incomplete");
     }
