@@ -129,16 +129,19 @@ def verify():
             try:
                 session.start(profile, dict(DEFAULTS, capture=capture, tun_system_proxy=combined,
                                             kill_switch=protection, preset='all', auto_reconnect=False))
+                print('Capture started.', flush=True)
                 if capture == 'tun':
                     previous = inbound_bytes(session, 'yukiwire-tun')
                     assert probe_https(port=None)['tls_verified']
                     wait_for(lambda: inbound_bytes(session, 'yukiwire-tun') > previous, 'HTTPS bypassed TUN')
+                    print('TUN HTTPS and inbound counters passed.', flush=True)
                 if capture == 'system' or combined:
                     proxy = WinInetProxy().read()
                     assert proxy['flags'] & 2 and proxy['server'] == session.own_proxy()
                     previous = inbound_bytes(session, 'local-http')
                     assert probe_https(port=session.endpoints['http'].port)['tls_verified']
                     wait_for(lambda: inbound_bytes(session, 'local-http') > previous, 'HTTP listener was bypassed')
+                    print('HTTP proxy and inbound counters passed.', flush=True)
                 if protection:
                     if capture == 'system':
                         assert not direct_tcp(), 'Direct traffic bypassed protection'

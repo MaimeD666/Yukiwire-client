@@ -305,7 +305,10 @@ class Broker:
             if not response or response.get('id') != self.sequence:
                 raise ValueError('Связь с сетевым компонентом потеряна. Журнал восстановления сохранён.')
             if not response.get('ok'):
-                raise ValueError('Сетевой компонент отклонил конфигурацию или не завершил очистку. Проверьте совместимость профиля и восстановление сети.')
+                detail = ''
+                if type(response.get('cleanup_stage')) is int and type(response.get('cleanup_exit')) is int:
+                    detail = ' (cleanup %d/%d)' % (response['cleanup_stage'], response['cleanup_exit'])
+                raise ValueError('Сетевой компонент отклонил конфигурацию или не завершил очистку. Проверьте совместимость профиля и восстановление сети.' + detail)
             return response.get('result')
 
     def close(self):

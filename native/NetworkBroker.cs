@@ -32,6 +32,7 @@ namespace Yukiwire {
   int serial;
   string pendingConfig;
   bool disposed;
+  static int cleanupStage, cleanupExit;
   void Diagnostic(string line,int generation) {
    if (String.IsNullOrEmpty(line)) return;
    string text = line.ToLowerInvariant();
@@ -98,9 +99,14 @@ namespace Yukiwire {
    string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");
    var info = new ProcessStartInfo(powershell,"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + Path.Combine(ProtectedStorage.DirectoryPath,"recover-tun.ps1") + "\" -AdapterName " + name + " -Description \"" + desc + "\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = ProtectedStorage.DirectoryPath, RedirectStandardOutput = true, RedirectStandardError = true };
    CleanEnvironment(info);
+   cleanupStage = 0; cleanupExit = 0;
    using (var process = Process.Start(info)) {
-    process.OutputDataReceived += delegate {}; process.ErrorDataReceived += delegate {}; process.BeginOutputReadLine(); process.BeginErrorReadLine();
-    if (!process.WaitForExit(20000)) { process.Kill(); process.WaitForExit(); return false; } return process.ExitCode == 0;
+    process.OutputDataReceived += delegate(object sender,DataReceivedEventArgs entry) {
+     if (entry.Data != null && Regex.IsMatch(entry.Data,@"^YUKIWIRE_CLEANUP_STAGE:[1-6]$")) cleanupStage = entry.Data[entry.Data.Length - 1] - '0';
+    };
+    process.ErrorDataReceived += delegate {}; process.BeginOutputReadLine(); process.BeginErrorReadLine();
+    if (!process.WaitForExit(20000)) { process.Kill(); process.WaitForExit(); cleanupExit = -1; return false; }
+    cleanupExit = process.ExitCode; return cleanupExit == 0;
    }
   }
   static void CleanEnvironment(ProcessStartInfo info) {
@@ -266,7 +272,7 @@ namespace Yukiwire {
      } catch (Exception) {
       // Never send raw exceptions, paths, profiles, or Xray stderr over this API.
       bool cleaned = false; try { cleaned = StopCore(); } catch (Exception) {}
-      Write(ObjectOf("id",id,"ok",false,"cleaned",cleaned));
+      Write(ObjectOf("id",id,"ok",false,"cleaned",cleaned,"cleanup_stage",cleanupStage,"cleanup_exit",cleanupExit));
      }
     }
    }
