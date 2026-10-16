@@ -4,7 +4,7 @@
 
 ## Продукт и платформа
 
-Yukiwire 0.4 — клиент Xray для Windows 10/11 x64. Репозиторий: `MaimeD666/Yukiwire-client`. Импорт VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и JSON Xray, включая userspace WireGuard; библиотека/HTTPS-подписки/QR, маршрутизация, игровые исключения, диагностика и статистика. Исправления аудита пока не выпущены новым релизом.
+Yukiwire 0.5 — клиент Xray для Windows 10/11 x64. Репозиторий: `MaimeD666/Yukiwire-client`. Импорт VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и JSON Xray, включая userspace WireGuard; библиотека/HTTPS-подписки/QR, маршрутизация, игровые исключения, диагностика и статистика. Версия и результаты публикации фиксируются в state.md.
 
 Режимы захвата: локальный прокси (`local`), системный прокси (`system`), TUN (`tun`). В TUN отдельно включается системный прокси (`tun_system_proxy`) для приложений, учитывающих настройки Windows. Чистый TUN и TUN с прокси — самостоятельные сценарии проверок.
 
@@ -18,11 +18,11 @@ UI написан на HTML/CSS/JavaScript без npm-сборки. Windows-хо
 | --- | --- | --- |
 | Запуск из исходников | `run.cmd`, `yukiwire/__main__.py`, `scripts/build_native.py` | Собрать/найти нативный хост и запустить его с путями проекта и Python |
 | Windows-хост | `native/WebShell.cs`, `native/Launcher.cs`, `native/app.manifest` | Окно, WebView2, трей, мост команд, жизненный цикл, передача работы сетевому помощнику |
-| Помощник TUN | `native/NetworkBroker.cs`, `native/NetworkPolicy.cs`, `native/ProtectedStorage.cs`, `native/NetworkInstaller.cs`, `yukiwire/broker.py`, `yukiwire/privilege.py` | Защищённая установка в Program Files; узкий native IPC, проверка конфигурации, Job Object и очистка собственного TUN. Python остаётся обычным процессом |
+| Помощник TUN | `native/NetworkBroker.cs`, `native/NetworkPolicy.cs`, `native/NetworkCleanup.cs`, `native/ProtectedStorage.cs`, `native/NetworkInstaller.cs`, `yukiwire/broker.py`, `yukiwire/privilege.py` | Защищённая установка в Program Files; узкий native IPC, проверка конфигурации, Job Object и очистка собственного TUN. Python остаётся обычным процессом |
 | Интерфейс | `ui/index.html`, `ui/app.js`, `ui/styles.css` | Формы, черновики, отображение событий сервиса, темы и размеры окна |
 | Сессия | `yukiwire/session.py`: `Session`, `validate_config` | Владение ядром/захватом, endpoints, запуск/остановка и восстановление. backend сохраняет импорт-алиас Session |
 | Команды | `yukiwire/backend.py`: `ApplicationService` | Сериализованные handlers, настройки, переподключение, фоновые задачи и мониторы |
-| Kill switch | `native/NetworkFilter.cs`, `native/NetworkKillSwitch.cs`, `yukiwire/killswitch.py` | Опциональная постоянная WFP-политика и отдельный журнал; реальные WFP-испытания открыты |
+| Kill switch | `native/NetworkFilter.cs`, `native/NetworkKillSwitch.cs`, `yukiwire/killswitch.py` | Опциональная постоянная WFP-политика и отдельный журнал; живые проверки и оставшаяся матрица — в state.md |
 | DNS / профили / журнал | `yukiwire/dns_config.py`, `yukiwire/subscriptions.py`, `yukiwire/diagnostics.py`, `ui/assets/jsQR.js` | Раздельный DNS, подписки, локальный QR, безопасные технические события |
 | Профиль → Xray | `yukiwire/config.py`: `build_config`, `other_link` | Парсинг ссылок/JSON, ограничение входной конфигурации, управляемые local inbound |
 | Правила | `yukiwire/routing.py`: `DEFAULTS`, `build_rules`, `apply_routing`, `explain` | Настройки, порядок маршрутов, игровые процессы, объяснение выбора маршрута |
@@ -36,7 +36,7 @@ UI написан на HTML/CSS/JavaScript без npm-сборки. Windows-хо
 | Браузер | `yukiwire/browser.py`, обработчик в `native/WebShell.cs` | Отдельный профиль браузера, явный локальный прокси, запуск от обычного пользователя |
 | Поставка и проверки | `scripts/build_*.py`, `scripts/verify_*.py`, `tests/`, `packaging/windows/Yukiwire.iss`, `.github/workflows/` | Сборка, установщик, автоматические проверки и публикация |
 
-Обычный путь команд: WebView2 → WPF → Python `ApplicationService` → `Session` → Xray. Для TUN обычный Python вызывает установленный `Yukiwire.Network.exe` через проверенный named pipe. Native helper запускает только закреплённый Xray и защищённый скрипт очистки; собственные PID/времена запуска/идентичность TUN сохраняет в защищённом журнале. Первичная установка компонента и его запуск требуют UAC; helper живёт до выхода backend и переиспользуется при переподключении. `native/NetworkWorker.cs` со старым Python-worker теперь компилируется только в тестовый host. Живая приёмка новой границы прав пока не завершена — см. state.md.
+Обычный путь команд: WebView2 → WPF → Python `ApplicationService` → `Session` → Xray. Для TUN обычный Python вызывает установленный `Yukiwire.Network.exe` через проверенный named pipe. Native helper запускает закреплённый Xray; очистка выполняется через IP Helper API и системный netsh; собственные PID/времена запуска/идентичность TUN сохраняет в защищённом журнале. Первичная установка компонента и его запуск требуют UAC; helper живёт до выхода backend и переиспользуется при переподключении. `native/NetworkWorker.cs` со старым Python-worker теперь компилируется только в тестовый host. Production IPC, TUN/system/combined и WFP проходят отдельную сетевую приёмку в CI; точные результаты — в state.md.
 
 ## Настройки и сетевые контракты
 
@@ -59,7 +59,7 @@ UI написан на HTML/CSS/JavaScript без npm-сборки. Windows-хо
 
 - В исходниках `RUNTIME = ROOT/runtime`, `STATE = runtime/state`, ядро — `runtime/core/xray.exe`. В portable с `portable.json` runtime совпадает с корнем сборки, состояние — `state/`, ядро — `core/xray.exe`.
 - Профили/URL подписок и настройки: `profiles.dpapi` / `settings.dpapi`; сетевой журнал: `network-lease.dpapi`, маркер постоянной WFP-защиты: `kill-switch.dpapi`. Реальные значения не нужны для понимания архитектуры.
-- Установщик сейчас per-user: `%LOCALAPPDATA%/Programs/Yukiwire`, `PrivilegesRequired=lowest`. Сетевая часть устанавливается отдельно в `%ProgramFiles%/YukiwireNetwork/<hash-helper>`; остальная программа остаётся per-user/portable. Legacy TUN-журнал требует завершения восстановления старой версией, пока новая реализация не может подтвердить безопасную очистку. Приёмка установки и миграции ещё открыта.
+- Установщик сейчас per-user: `%LOCALAPPDATA%/Programs/Yukiwire`, `PrivilegesRequired=lowest`. Сетевая часть устанавливается отдельно в `%ProgramFiles%/YukiwireNetwork/<hash-helper>`; остальная программа остаётся per-user/portable. Legacy TUN-журнал требует завершения восстановления старой версией, пока новая реализация не может подтвердить безопасную очистку. Защищённая установка проверяется в CI; миграция legacy-сессий требует старого recovery.
 - `build_portable.py` собирает явный список публичных файлов и SHA256-манифест. Новая папка контекста автоматически в пакет приложения не включается. Установщик проверяет этот payload, сохраняет приватное состояние и блокирует обслуживание при работающем хосте/незавершённом журнале.
 - Версия Xray в загрузчике — `v26.9.30`, SHA256 архива закреплён независимо в исходниках. Embedded Python в `download_python.py` — `3.14.8`; исходники/CI используют минимум/версию 3.11. Эти значения описывают исходники, а не проверенный состав установленного приложения.
 
@@ -73,8 +73,8 @@ python scripts/download_wintun.py
 python -m yukiwire
 ```
 
-Для сборки: `python scripts/build_native.py`, затем `python scripts/build_portable.py` и `python scripts/build_installer.py`. Portable по умолчанию требует Wintun; вспомогательные скрипты загружают WebView2 SDK и embedded Python. Имена актуальных артефактов — `dist/Yukiwire-0.4-win-x64.zip` и `dist/Yukiwire-0.4-win-x64-setup.exe`.
+Для сборки: `python scripts/build_native.py`, затем `python scripts/build_portable.py` и `python scripts/build_installer.py`. Portable по умолчанию требует Wintun; вспомогательные скрипты загружают WebView2 SDK и embedded Python. Имена актуальных артефактов — `dist/Yukiwire-0.5-win-x64.zip` и `dist/Yukiwire-0.5-win-x64-setup.exe`.
 
 `build_portable` включает неизменённый RU snapshot `88549b306b2b19c6e19ddd09fe9f27f4fb92df10` из `download_rules.py`, с независимыми SHA256 и лицензией; исходные runtime/core geodata при сборке не перезаписываются. Setup включает подписанный полный WebView2 x64 (offline), .NET 4.8 остаётся предварительным требованием. Чистая машина без Runtime ещё не проверена.
 
-Команды тестов и их внешние эффекты описаны в [testing.md](testing.md). CI Checks выполняет тесты, сборку и проверки UI/пакетов. Release запускается по тегу, проверяет совпадение версии, собирает и проверяет артефакт в этом же workflow; Actions закреплены SHA. Checks прошёл на GitHub для кодовой ревизии 3f91d925; ссылки — в state.md. Release по тегу ещё не выполнялся.
+Команды тестов и их внешние эффекты описаны в [testing.md](testing.md). Checks выполняет тесты, сборку и проверки UI/пакетов. Network acceptance меняет сеть только на одноразовой Windows VM GitHub. Release запускается по изменению version.py в main или тегу v*, собирает пакет и проверяет его же ZIP с bundled Python в сетевой приёмке. Только затем создаёт тег, проверяет загруженные ZIP/Setup/SHA256SUMS и публикует релиз. Actions закреплены SHA; результаты запусков — в state.md.

@@ -59,7 +59,7 @@ python -B -m unittest discover -s tests -v
 
 ```powershell
 python scripts/build_portable.py
-python scripts/verify_portable.py dist/Yukiwire-0.4-win-x64.zip --native
+python scripts/verify_portable.py dist/Yukiwire-0.5-win-x64.zip --native
 python scripts/build_installer.py
 python scripts/verify_installer.py
 ```
@@ -110,3 +110,11 @@ python scripts/verify_installer.py
 - Пакет: bundled RU manifest/хэши/rollback, оба network payload, production без test worker. `verify_installer.py` использует отдельный mutex и регистрацию; проверяет блокировку update/uninstall обоими журналами. Требует существующий WebView2, не доказывает offline-установку prerequisite.
 
 Для `verify_release.py` использовать отдельную папку ровно с финальными ZIP, Setup и SHA256SUMS.txt. В dist могут оставаться тестовые/промежуточные файлы; не выдавать всю dist за набор релиза. После реальной публикации релиза отдельно проверяются загруженные размеры/digests; создание ветки/PR такой проверкой не является.
+
+## Сетевая приёмка версии 0.5 в CI
+
+`network-acceptance.yml` использует только elevated GitHub-hosted Windows runner и публичный синтетический VLESS peer; сохранённые профили не читаются. `verify_network_live.py` вне этой среды отказывается работать. Проверяются system/pure TUN/combined, реальные HTTPS и счётчики каждого inbound, proxy/foreign snapshots, остановка/EOF, WFP после аварии ядра/помощника и явное восстановление. DNS сравнивает ответы одного UDP-резолвера до/во время/после защиты, включая ранее открытый UDP socket. Отсутствие рабочей IPv6-связности отмечается как SKIP, а не успех. VM имеет отключённый UAC: это не тест диалога согласия на рабочем ПК.
+
+`test_network_cleanup.py` проверяет точные x64 IP Helper layouts и отказ чужого адаптера без изменений сети. Реальная очистка проверяется только в сетевой приёмке. Для IPC дополнительно обязателен test_broker_pipe с настоящим Windows pipe.
+
+В Release после Checks выполняется `verify_network_package.py <ZIP>`: проверка манифеста, извлечение в отдельную папку и production helper/live-сценарии именно с bundled Python и компонентом из публикуемого ZIP. Test-only аварийный процесс снимает только WFP-ключи данного компонента/учётной записи; он не входит в пакет. Публикация зависит от успеха этой проверки, затем проверяются размеры/digests всех загруженных assets.
