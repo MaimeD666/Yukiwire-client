@@ -1,0 +1,25 @@
+name: Network acceptance
+on:
+  push:
+    branches: [audit-hardening, main]
+    paths:
+      - 'native/**'
+      - 'yukiwire/**'
+      - 'scripts/**'
+      - '.github/workflows/network-acceptance.yml'
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  network:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - run: python scripts/download_core.py
+      - run: python scripts/download_wintun.py
+      - name: Protected production helper, prepare/stop and EOF
+        run: python -u scripts/verify_network_component.py --install
