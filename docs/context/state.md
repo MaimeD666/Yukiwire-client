@@ -4,9 +4,9 @@
 
 ## Этап и публикация
 
-Пользователь поручил завершить проверки, объединить изменения в исходную main и обновить Releases, сохранив работающий VPN. Исправления опубликованы в audit-hardening, [PR #1](https://github.com/MaimeD666/Yukiwire-client/pull/1); объединение и выпуск 0.5 выполняются. Не считать публикацию ветки выпуском релиза. Точный реестр — [audit.md](audit.md).
+Исправления объединены в исходную `main`: [PR #1](https://github.com/MaimeD666/Yukiwire-client/pull/1), ревизия `81510fd6f14e5d0593f9d58595bc0e2c6b05f826`. Опубликован [v0.5](https://github.com/MaimeD666/Yukiwire-client/releases/tag/v0.5), тег указывает на эту ревизию; публичный latest проверен. В релизе ровно ZIP, Setup и SHA256SUMS.txt. Последующая правка этих документов фиксирует результат выпуска и не меняет код/пакеты. Точный реестр — [audit.md](audit.md).
 
-Исходная main — `5fea661b26b5837d14f55ff29302b1a66ae20200`. Локальный HEAD исходно unborn main; прежний индекс содержит staged-дерево и сохранён. Для публикации используется отдельный `runtime/audit-compare.index`, ветка audit-hardening и Git `runtime/dev-tools/mingit/cmd/git.exe`. Эти документы описывают исходники, а не установленную пользовательскую программу.
+Исходная main — `5fea661b26b5837d14f55ff29302b1a66ae20200`. Локальный HEAD исходно unborn main; прежний индекс содержит staged-дерево и сохранён. Для публикации использован отдельный `runtime/audit-compare.index` и Git `runtime/dev-tools/mingit/cmd/git.exe`; refs/remotes/origin/main синхронизирован, исходный индекс/HEAD сохранены. Эти документы описывают исходники, а не установленную пользовательскую программу.
 
 Собственная подпись явно не требуется пользователю: аудит 4 — принятое ограничение. Активный VPN и zapret на его ПК в этом продолжении не отключались; живые изменения сети перенесены на одноразовую Windows VM GitHub.
 
@@ -33,8 +33,8 @@
 - Текущее дерево: `python -B -m unittest discover -s tests -v` — **222 теста, OK, exit 0**. Настоящий Xray, local DNS/игровой TCP/UDP, DPAPI/Планировщик/watchdog, native policy, WFP/IP Helper ABI и настоящий duplex pipe. Полный набор имеет внешние эффекты, описанные в testing.md.
 - [Network acceptance](https://github.com/MaimeD666/Yukiwire-client/actions/runs/38889421618), ревизия `a9308c7c007104539500677802e74c6354ab2dd8`: защищённая установка/ACL/хэши, production IPC/prepare/stop/stale serial/EOF; настоящий system, pure TUN и combined; HTTPS с ростом счётчиков соответствующего inbound; снимки proxy/чужой сети восстановлены.
 - В той же приёмке: настоящий WFP для system/combined, прямой TCP заблокирован, после аварии ядра/помощника блокировка сохранена; DNS UDP проверяет реальные ответы и уже открытый socket; явное release/recovery возвращает сеть, журналы удаляются. Разрыв IPC очищает собственный TUN. IPv6 DNS **SKIP**: у VM нет рабочей IPv6-базы; не выдавать проверку ABI за IPv6-трафик.
-- Checks на GitHub проверяет 222 теста, production без test hooks, UI (8 размеров/DPI, обе темы, формы/QR/диагностика), native/browser/helper crash, portable с bundled Python 3.14.8, установку/обновление/удаление отдельной тестовой копии и точный payload. Финальная проверка новой ревизии ещё выполняется; предыдущие успешные результаты не заменяют её.
-- Release зависит от Checks и дополнительной сетевой приёмки **того же ZIP** с bundled Python и helper; затем сверяет точный набор ZIP/Setup/SHA256SUMS и digest/размер каждого загруженного asset. Результат публикации нужно записать после завершения workflow.
+- [Release workflow](https://github.com/MaimeD666/Yukiwire-client/actions/runs/38889909332), ревизия `81510fd6`: все этапы прошли. Build/Checks: 222 теста после загрузки Xray; production без test hooks; UI (8 размеров/DPI, обе темы, формы/QR/диагностика); native/browser/helper crash; portable с bundled Python 3.14.8; установка/обновление/удаление отдельной тестовой копии, сохранение private sentinel и точный payload. Первый прогон до загрузки Xray явно пропускает 12 интеграций, второй выполняет их.
+- Тот же Release прошёл дополнительную сетевую приёмку **именно опубликованного ZIP** с bundled Python и production helper: TUN/system/combined, TCP/UDP DNS, core/helper crash, EOF и recovery. IPv6 DNS отмечен SKIP. После загрузки проверены точный набор, digest и размер каждого asset; публичные latest/tag/commit дополнительно сверены. ZIP — 63 945 757 байт, Setup — 262 479 649 байт (с offline WebView2). SHA256 опубликованы в SHA256SUMS.txt.
 
 ## Оставшиеся ограничения и приёмка
 
@@ -44,4 +44,4 @@
 
 ## Следующий конкретный шаг
 
-Дождаться финальных Checks, объединить PR в main и завершить Release v0.5. Проверить опубликованные assets и обновить этот раздел ссылкой/ревизией результата. После выпуска — повторный независимый аудит и оставшаяся матрица выше.
+Публикация завершена. Следующий этап — повторный независимый аудит `main`/v0.5 и оставшаяся матрица выше. Не запускать опасные сетевые сценарии на рабочем ПК пользователя ради расширения матрицы; использовать отдельную среду. README остаётся 68 строк.
