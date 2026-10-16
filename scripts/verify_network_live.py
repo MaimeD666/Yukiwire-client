@@ -79,19 +79,28 @@ def direct_tcp():
         return False
 
 
-def udp_send_error(family, destination):
-    with socket.socket(family, socket.SOCK_DGRAM) as connection:
-        connection.settimeout(2)
-        try:
-            connection.sendto(b'\x00' * 12, destination)
-            return 0
-        except OSError as error:
-            return error.winerror or error.errno
+def udp_dns(family, destination, connection=None):
+    owned = connection is None
+    connection = connection or socket.socket(family, socket.SOCK_DGRAM)
+    connection.settimeout(2)
+    identifier = os.urandom(2)
+    query = identifier + b'\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01'
+    try:
+        connection.sendto(query, destination)
+        response, _ = connection.recvfrom(4096)
+        return len(response) >= 12 and response[:2] == identifier and bool(response[2] & 128)
+    except OSError:
+        return False
+    finally:
+        if owned:
+            connection.close()
 
 
 def blocked_udp(destinations):
     for family, destination in destinations:
-        assert udp_send_error(family, destination) == 10013, 'UDP/DNS was not denied by Windows filtering'
+        # UDP send completion does not prove delivery; compare actual replies
+        # from the same resolver before, during and after protection.
+        assert not udp_dns(family, destination), 'UDP/DNS replied despite protection'
 
 
 def rescue(identity, executable):
@@ -123,10 +132,13 @@ def verify():
     before_proxy, before_foreign = WinInetProxy().read(), foreign_snapshot()
     default = next(r for r in routes() if r['prefix'] == '0.0.0.0/0')
     physical = next(a['name'] for a in adapters() if a['index'] == default['index'])
-    udp_destinations = [(socket.AF_INET, ('1.1.1.1', 53)),
-                        (socket.AF_INET6, ('fe80::f00d', 53, 0, default['index']))]
-    for family, destination in udp_destinations:
-        assert udp_send_error(family, destination) == 0, 'UDP baseline must be sendable before WFP'
+    udp_destinations = [(socket.AF_INET, ('1.1.1.1', 53))]
+    assert udp_dns(*udp_destinations[0]), 'Real UDP DNS baseline is unavailable'
+    ipv6_dns = (socket.AF_INET6, ('2606:4700:4700::1111', 53))
+    if udp_dns(*ipv6_dns):
+        udp_destinations.append(ipv6_dns)
+    else:
+        print('SKIP live IPv6 DNS: runner has no working baseline; IPv6 filter ABI is checked separately.', flush=True)
     helper, identity = installed_helper()
     executable = helper.parent / 'xray.exe'
     rescue(identity, executable)
@@ -179,6 +191,8 @@ def verify():
                     blocked_udp(udp_destinations)
                     session.protection.release(session.broker)
                     wait_for(direct_tcp, 'Explicit protection release did not restore network')
+                    for destination in udp_destinations:
+                        assert udp_dns(*destination), 'UDP DNS did not recover'
                 else:
                     session.stop()
                 assert WinInetProxy().read() == before_proxy, 'System proxy was not restored'
