@@ -99,6 +99,8 @@ python scripts/verify_installer.py
 
 ## Новые обязательные сценарии
 
+- `test_broker_pipe.py`: настоящий named pipe без UAC, одновременное ожидание чтения/запись большого кадра, отмена ожидания клиента/чтения, ограничение кадра и проверка PID. Это обязательная регрессия блокировки синхронного duplex. `network-acceptance.yml` запускает production helper и `verify_network_live.py` на одноразовой Windows VM; последний скрипт явно отказывается работать вне elevated GitHub-hosted runner.
+
 - `test_dns.py`: настоящий Xray и два локальных UDP DNS-сервера; direct/proxy/block/пересечения/fallback. Живые DNS IPv6/TUN проверять отдельно.
 - `test_subscriptions.py`, `test_profile_tasks.py`, `test_storage.py`: HTTPS/размер/атомарность/dedup, stop во время фоновой загрузки, запрет поздней записи после close, отдельное ядро замера и отказ при ошибке cleanup.
 - `test_config.py`, `test_core_integration.py`, `test_network_policy.py`: Hysteria2/Salamander, KCP без неработающего seed, userspace WG, запрет masquerade-файлов/kernel WG. Приём конфигурации ядром не подтверждает подключение к каждому реальному серверу.

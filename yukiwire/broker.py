@@ -17,6 +17,11 @@ from .privilege import helper_directory, require_protected_helper
 LIMIT = 4 * 1024 * 1024
 
 
+class Overlapped(ctypes.Structure):
+    _fields_ = [('internal', ctypes.c_size_t), ('internal_high', ctypes.c_size_t),
+                ('offset', wintypes.DWORD), ('offset_high', wintypes.DWORD), ('event', wintypes.HANDLE)]
+
+
 def kernel_api():
     api = ctypes.WinDLL('kernel32', use_last_error=True)
     api.CloseHandle.argtypes = [wintypes.HANDLE]
@@ -82,6 +87,13 @@ def installed_helper():
 class Pipe:
     def __init__(self):
         self.api = kernel_api()
+        self.state_lock = threading.RLock()
+        self.pending = 0
+        self.closing = False
+        self.api.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+        self.api.CreateEventW.restype = wintypes.HANDLE
+        self.api.GetOverlappedResult.argtypes = [wintypes.HANDLE, ctypes.c_void_p,
+                                                ctypes.POINTER(wintypes.DWORD), wintypes.BOOL]
         self.api.CreateNamedPipeW.argtypes = [wintypes.LPCWSTR] + [wintypes.DWORD] * 6 + [ctypes.c_void_p]
         self.api.CreateNamedPipeW.restype = wintypes.HANDLE
         self.api.ConnectNamedPipe.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
@@ -125,15 +137,54 @@ class Pipe:
         security = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
         self.name = 'YukiwireCore.' + uuid.uuid4().hex
         try:
-            self.handle = self.api.CreateNamedPipeW('\\\\.\\pipe\\' + self.name, 3 | 0x80000, 8, 1, 65536, 65536, 0, ctypes.byref(security))
+            self.handle = self.api.CreateNamedPipeW('\\\\.\\pipe\\' + self.name, 3 | 0x80000 | 0x40000000, 8, 1, 65536, 65536, 0, ctypes.byref(security))
             if self.handle == ctypes.c_void_p(-1).value:
                 raise ctypes.WinError(ctypes.get_last_error())
         finally:
             self.api.LocalFree(descriptor)
 
-    def connect(self, expected_pid):
-        if not self.api.ConnectNamedPipe(self.handle, None) and ctypes.get_last_error() != 535:
+    def _io(self, function, *arguments, timeout=0xffffffff, connecting=False):
+        # Synchronous handles serialize a pending read with writes, deadlocking
+        # a request/reply channel whose reader waits for the next event.
+        operation = Overlapped()
+        operation.event = self.api.CreateEventW(None, True, False, None)
+        if not operation.event:
             raise ctypes.WinError(ctypes.get_last_error())
+        count = wintypes.DWORD()
+        registered = False
+        try:
+            with self.state_lock:
+                if self.closing:
+                    raise EOFError('Network helper closed')
+                handle = self.handle
+                self.pending += 1
+                registered = True
+                params = (handle, ctypes.byref(operation)) if connecting else (
+                    handle, *arguments, ctypes.byref(count), ctypes.byref(operation))
+                completed = function(*params)
+                error = ctypes.get_last_error() if not completed else 0
+            if connecting and error == 535:  # Client connected before ConnectNamedPipe.
+                return 0
+            if not completed and error != 997:  # ERROR_IO_PENDING
+                raise ctypes.WinError(error)
+            if not completed and self.api.WaitForSingleObject(operation.event, timeout) != 0:
+                self.api.CancelIoEx(handle, ctypes.byref(operation))
+                # Keep buffers/OVERLAPPED alive until cancellation finishes.
+                self.api.GetOverlappedResult(handle, ctypes.byref(operation), ctypes.byref(count), True)
+                raise TimeoutError('Network helper I/O timed out')
+            if not self.api.GetOverlappedResult(handle, ctypes.byref(operation), ctypes.byref(count), False):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return count.value
+        finally:
+            with self.state_lock:
+                self.api.CloseHandle(operation.event)
+                if registered:
+                    self.pending -= 1
+                if self.closing and not self.pending:
+                    self._dispose()
+
+    def connect(self, expected_pid):
+        self._io(self.api.ConnectNamedPipe, timeout=20000, connecting=True)
         pid = wintypes.ULONG()
         if not self.api.GetNamedPipeClientProcessId(self.handle, ctypes.byref(pid)) or pid.value != expected_pid:
             raise ValueError('Не удалось проверить сетевой компонент.')
@@ -142,10 +193,10 @@ class Pipe:
         result = bytearray()
         while len(result) < size:
             buffer = ctypes.create_string_buffer(size - len(result))
-            count = wintypes.DWORD()
-            if not self.api.ReadFile(self.handle, buffer, len(buffer), ctypes.byref(count), None) or not count.value:
+            count = self._io(self.api.ReadFile, buffer, len(buffer))
+            if not count:
                 raise EOFError('Network helper closed')
-            result.extend(buffer.raw[:count.value])
+            result.extend(buffer.raw[:count])
         return bytes(result)
 
     def receive(self):
@@ -160,17 +211,24 @@ class Pipe:
             raise ValueError('Конфигурация сетевого компонента слишком велика.')
         data = struct.pack('<I', len(data)) + data
         while data:
-            count = wintypes.DWORD()
-            if not self.api.WriteFile(self.handle, data, len(data), ctypes.byref(count), None) or not count.value:
+            count = self._io(self.api.WriteFile, data, len(data), timeout=60000)
+            if not count:
                 raise EOFError('Network helper closed')
-            data = data[count.value:]
+            data = data[count:]
 
-    def close(self):
+    def _dispose(self):
         if self.handle:
-            self.api.CancelIoEx(self.handle, None)
             self.api.DisconnectNamedPipe(self.handle)
             self.api.CloseHandle(self.handle)
             self.handle = None
+
+    def close(self):
+        with self.state_lock:
+            self.closing = True
+            if self.handle:
+                self.api.CancelIoEx(self.handle, None)
+                if not self.pending:
+                    self._dispose()
 
 
 class Broker:
