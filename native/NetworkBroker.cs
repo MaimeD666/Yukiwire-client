@@ -19,7 +19,6 @@ namespace Yukiwire {
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern bool SetDllDirectory(string path);
   [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
-  [DllImport("iphlpapi.dll",CharSet=CharSet.Unicode)] static extern uint ConvertInterfaceAliasToLuid(string alias,out ulong luid);
   readonly object stateLock = new object(), writeLock = new object();
   readonly Process parent;
   readonly NamedPipeClientStream pipe;
@@ -32,7 +31,6 @@ namespace Yukiwire {
   int serial;
   string pendingConfig;
   bool disposed;
-  static int cleanupStage, cleanupExit;
   void Diagnostic(string line,int generation) {
    if (String.IsNullOrEmpty(line)) return;
    string text = line.ToLowerInvariant();
@@ -89,29 +87,8 @@ namespace Yukiwire {
     if (ProtectedStorage.Digest(path) != NetworkBuild.Hashes[i]) throw new InvalidOperationException("Damaged network component");
    }
   }
-  static bool CleanupAdapter(string name,string desc) {
-   if (!Regex.IsMatch(name,@"^Yukiwire-[a-f0-9]{12}$") || desc != "Yukiwire " + name.Substring(9)) throw new InvalidOperationException("Invalid adapter identity");
-   // A prepared core has not created TUN yet; Wintun normally deletes its
-   // adapter on exit too. Confirm absence through IP Helper before invoking CIM.
-   ulong luid; uint lookup = ConvertInterfaceAliasToLuid(name,out luid);
-   if (lookup == 87) return true; // ERROR_INVALID_PARAMETER: no such valid alias.
-   if (lookup != 0) return false;
-   string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");
-   var info = new ProcessStartInfo(powershell,"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + Path.Combine(ProtectedStorage.DirectoryPath,"recover-tun.ps1") + "\" -AdapterName " + name + " -Description \"" + desc + "\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = ProtectedStorage.DirectoryPath, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-   CleanEnvironment(info);
-   cleanupStage = 0; cleanupExit = 0;
-   using (var process = Process.Start(info)) {
-    // A GUI/UAC parent has no usable console input. Never inherit its stdin.
-    process.StandardInput.Close();
-    process.OutputDataReceived += delegate(object sender,DataReceivedEventArgs entry) {
-     if (entry.Data != null && Regex.IsMatch(entry.Data,@"^YUKIWIRE_CLEANUP_STAGE:[1-6]$")) cleanupStage = entry.Data[entry.Data.Length - 1] - '0';
-    };
-    process.ErrorDataReceived += delegate {}; process.BeginOutputReadLine(); process.BeginErrorReadLine();
-    if (!process.WaitForExit(20000)) { process.Kill(); process.WaitForExit(); cleanupExit = -1; return false; }
-    cleanupExit = process.ExitCode; return cleanupExit == 0;
-   }
-  }
-  static void CleanEnvironment(ProcessStartInfo info) {
+  static bool CleanupAdapter(string name,string desc) { return NetworkCleanup.Remove(name,desc); }
+  internal static void CleanEnvironment(ProcessStartInfo info) {
    // No caller-controlled core configuration, DLL/plugin search, PowerShell modules,
    // or Go runtime diagnostics. Start from a small OS environment.
    info.EnvironmentVariables.Clear();
@@ -274,7 +251,7 @@ namespace Yukiwire {
      } catch (Exception) {
       // Never send raw exceptions, paths, profiles, or Xray stderr over this API.
       bool cleaned = false; try { cleaned = StopCore(); } catch (Exception) {}
-      Write(ObjectOf("id",id,"ok",false,"cleaned",cleaned,"cleanup_stage",cleanupStage,"cleanup_exit",cleanupExit));
+      Write(ObjectOf("id",id,"ok",false,"cleaned",cleaned,"cleanup_stage",NetworkCleanup.Stage,"cleanup_exit",NetworkCleanup.ExitCode));
      }
     }
    }

@@ -331,7 +331,9 @@ class RemoteProcess:
         event = self.broker.exits.get(self.serial)
         if event:
             self.returncode = event['code']
-        elif self.broker.closed.is_set():
+        else:
+            # A helper may have killed the core but retained a failed cleanup
+            # lease. Observe PID + creation time even if IPC is still connected.
             from .network import process_identity
             if process_identity(self.pid) != self.started:
                 self.returncode = 1

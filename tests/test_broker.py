@@ -32,9 +32,16 @@ class BrokerLifecycleTests(unittest.TestCase):
     def test_exit_notifications_are_bound_to_core_serial(self):
         process = RemoteProcess(self.broker, self.result)
         self.broker.exits[6] = {'code': 1}
-        self.assertIsNone(process.poll())
+        with patch('yukiwire.network.process_identity', return_value=456):
+            self.assertIsNone(process.poll())
         self.broker.exits[7] = {'code': 2}
         self.assertEqual(process.poll(), 2)
+
+    def test_failed_cleanup_does_not_hide_a_terminated_core_on_live_ipc(self):
+        process = RemoteProcess(self.broker, self.result)
+        self.assertFalse(self.broker.closed.is_set())
+        with patch('yukiwire.network.process_identity', return_value=None):
+            self.assertEqual(process.poll(), 1)
 
     def test_pipe_death_does_not_claim_live_core_is_stopped(self):
         process = RemoteProcess(self.broker, self.result)

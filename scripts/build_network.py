@@ -18,7 +18,7 @@ def build():
     assets = {'xray.exe': ROOT / 'runtime/core/xray.exe',
               'wintun.dll': ROOT / 'runtime/core/wintun.dll',
               'recover-tun.ps1': ROOT / 'scripts/recover-tun.ps1'}
-    sources = [ROOT / 'native' / name for name in ('ProtectedStorage.cs', 'NetworkPolicy.cs', 'NetworkBroker.cs', 'NetworkInstaller.cs', 'NetworkFilter.cs', 'NetworkKillSwitch.cs')]
+    sources = [ROOT / 'native' / name for name in ('ProtectedStorage.cs', 'NetworkPolicy.cs', 'NetworkBroker.cs', 'NetworkInstaller.cs', 'NetworkFilter.cs', 'NetworkKillSwitch.cs', 'NetworkCleanup.cs')]
     # Any implementation, build, or pinned-payload change gets an isolated install.
     source_sha256 = hashlib.sha256(b''.join(path.read_bytes() for path in [*sources, *assets.values(), ROOT / 'native/app.manifest', Path(__file__)])).hexdigest()
     manifest_path = destination / 'component.json'
