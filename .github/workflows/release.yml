@@ -1,7 +1,9 @@
 name: Release
 on:
   push:
+    branches: [main]
     tags: ['v*']
+    paths: ['yukiwire/version.py']
 permissions:
   contents: read
 concurrency:
@@ -10,8 +12,10 @@ concurrency:
 jobs:
   build:
     uses: ./.github/workflows/check.yml
+  network:
+    uses: ./.github/workflows/network-acceptance.yml
   publish:
-    needs: build
+    needs: [build, network]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -19,7 +23,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: v${{ needs.build.outputs.version }}
       RELEASE_COMMIT: ${{ github.sha }}
       PACKAGE_NAME: ${{ needs.build.outputs.package }}
     steps:
@@ -30,12 +34,19 @@ jobs:
           path: release-assets
       - name: Verify tested artifacts from this run
         run: python3 scripts/verify_release.py release-assets
+      - name: Create immutable version tag after all checks
+        run: |
+          if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" > tag.json 2>/dev/null; then
+            python3 -c "import json, os; tag=json.load(open('tag.json')); assert tag['object']['type'] == 'commit' and tag['object']['sha'] == os.environ['RELEASE_COMMIT'], 'Release tag points to another commit'"
+          else
+            gh api "repos/$GH_REPO/git/refs" -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$RELEASE_COMMIT" > tag.json
+          fi
       - name: Upload draft
         run: |
           gh release create "$RELEASE_TAG" \
             "release-assets/$PACKAGE_NAME-setup.exe" \
             "release-assets/$PACKAGE_NAME.zip" release-assets/SHA256SUMS.txt \
-            --draft --verify-tag --target "$RELEASE_COMMIT" --title "Yukiwire $RELEASE_TAG" --generate-notes
+            --draft --verify-tag --target "$RELEASE_COMMIT" --title "Yukiwire $RELEASE_TAG" --notes-file packaging/windows/release-notes.md
       - name: Verify upload and publish
         run: |
           gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name == \"$RELEASE_TAG\")" > uploaded.json

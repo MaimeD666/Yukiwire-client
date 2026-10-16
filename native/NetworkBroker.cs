@@ -19,6 +19,7 @@ namespace Yukiwire {
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern bool SetDllDirectory(string path);
   [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
+  [DllImport("iphlpapi.dll",CharSet=CharSet.Unicode)] static extern uint ConvertInterfaceAliasToLuid(string alias,out ulong luid);
   readonly object stateLock = new object(), writeLock = new object();
   readonly Process parent;
   readonly NamedPipeClientStream pipe;
@@ -89,6 +90,11 @@ namespace Yukiwire {
   }
   static bool CleanupAdapter(string name,string desc) {
    if (!Regex.IsMatch(name,@"^Yukiwire-[a-f0-9]{12}$") || desc != "Yukiwire " + name.Substring(9)) throw new InvalidOperationException("Invalid adapter identity");
+   // A prepared core has not created TUN yet; Wintun normally deletes its
+   // adapter on exit too. Confirm absence through IP Helper before invoking CIM.
+   ulong luid; uint lookup = ConvertInterfaceAliasToLuid(name,out luid);
+   if (lookup == 87) return true; // ERROR_INVALID_PARAMETER: no such valid alias.
+   if (lookup != 0) return false;
    string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");
    var info = new ProcessStartInfo(powershell,"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + Path.Combine(ProtectedStorage.DirectoryPath,"recover-tun.ps1") + "\" -AdapterName " + name + " -Description \"" + desc + "\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = ProtectedStorage.DirectoryPath, RedirectStandardOutput = true, RedirectStandardError = true };
    CleanEnvironment(info);

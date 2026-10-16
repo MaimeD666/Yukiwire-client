@@ -20,7 +20,7 @@ def build():
               'recover-tun.ps1': ROOT / 'scripts/recover-tun.ps1'}
     sources = [ROOT / 'native' / name for name in ('ProtectedStorage.cs', 'NetworkPolicy.cs', 'NetworkBroker.cs', 'NetworkInstaller.cs', 'NetworkFilter.cs', 'NetworkKillSwitch.cs')]
     # Any implementation, build, or pinned-payload change gets an isolated install.
-    source_sha256 = hashlib.sha256(b''.join(path.read_bytes() for path in [*sources, *assets.values(), Path(__file__)])).hexdigest()
+    source_sha256 = hashlib.sha256(b''.join(path.read_bytes() for path in [*sources, *assets.values(), ROOT / 'native/app.manifest', Path(__file__)])).hexdigest()
     manifest_path = destination / 'component.json'
     if manifest_path.exists():
         previous = json.loads(manifest_path.read_text(encoding='utf-8'))
