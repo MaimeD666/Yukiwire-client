@@ -79,6 +79,21 @@ def direct_tcp():
         return False
 
 
+def udp_send_error(family, destination):
+    with socket.socket(family, socket.SOCK_DGRAM) as connection:
+        connection.settimeout(2)
+        try:
+            connection.sendto(b'\x00' * 12, destination)
+            return 0
+        except OSError as error:
+            return error.winerror or error.errno
+
+
+def blocked_udp(destinations):
+    for family, destination in destinations:
+        assert udp_send_error(family, destination) == 10013, 'UDP/DNS was not denied by Windows filtering'
+
+
 def rescue(identity, executable):
     # This binary is never packaged or installed. Parent death/timeout restores
     # only the deterministic filter keys of this component and current account.
@@ -95,7 +110,7 @@ def rescue(identity, executable):
 
 def verify():
     require_disposable_runner()
-    from yukiwire.broker import installed_helper
+    from yukiwire.broker import Broker, installed_helper
     from yukiwire.health import probe_https
     from yukiwire.network import WinInetProxy, process_identity, tun_clean
     from yukiwire.paths import STATE
@@ -108,6 +123,10 @@ def verify():
     before_proxy, before_foreign = WinInetProxy().read(), foreign_snapshot()
     default = next(r for r in routes() if r['prefix'] == '0.0.0.0/0')
     physical = next(a['name'] for a in adapters() if a['index'] == default['index'])
+    udp_destinations = [(socket.AF_INET, ('1.1.1.1', 53)),
+                        (socket.AF_INET6, ('fe80::f00d', 53, 0, default['index']))]
+    for family, destination in udp_destinations:
+        assert udp_send_error(family, destination) == 0, 'UDP baseline must be sendable before WFP'
     helper, identity = installed_helper()
     executable = helper.parent / 'xray.exe'
     rescue(identity, executable)
@@ -150,12 +169,14 @@ def verify():
                 if protection:
                     if capture == 'system':
                         assert not direct_tcp(), 'Direct traffic bypassed protection'
+                        blocked_udp(udp_destinations)
                     core = session.core.process
                     terminate_owned(core.pid, core.started)
                     wait_for(lambda: core.poll() is not None, 'Core exit was not reported')
                     session.stop()
                     assert session.protection.active
                     assert not direct_tcp(), 'Traffic leaked after core death'
+                    blocked_udp(udp_destinations)
                     session.protection.release(session.broker)
                     wait_for(direct_tcp, 'Explicit protection release did not restore network')
                 else:
@@ -187,7 +208,37 @@ def verify():
         finally:
             session.stop()
             session.broker.close()
-        print('Production TUN/system/combined, WFP core crash/release and EOF recovery passed.', flush=True)
+
+        print('Live protected helper crash and explicit recovery...', flush=True)
+        session = Session()
+        try:
+            session.start(profile, dict(DEFAULTS, capture='tun', tun_system_proxy=True,
+                                        kill_switch=True, preset='all', auto_reconnect=False))
+            core = session.core.process
+            helper_pid = session.broker.pipe.api.GetProcessId(session.broker.handle)
+            terminate_owned(helper_pid, process_identity(helper_pid))
+            wait_for(lambda: session.broker.closed.is_set(), 'Helper crash was not detected')
+            wait_for(lambda: core.poll() is not None, 'Core survived helper crash')
+            # Windows closed the job, but the persistent filter must still block.
+            assert session.protection.active
+            assert not direct_tcp(), 'Traffic leaked after helper crash'
+            blocked_udp(udp_destinations)
+            recovery = Broker(component_identity=identity)
+            try:
+                recovery.request('recover')
+            finally:
+                recovery.close()
+            session.stop()
+            session.protection.release()
+            wait_for(direct_tcp, 'Recovery after helper crash did not restore connectivity')
+            assert WinInetProxy().read() == before_proxy
+            assert foreign_snapshot() == before_foreign
+            assert not (STATE / 'network-lease.dpapi').exists()
+        finally:
+            session.stop()
+            session.protection.release()
+            session.broker.close()
+        print('Production TUN/system/combined, WFP TCP/UDP/DNS, core/helper crash and EOF recovery passed.', flush=True)
     finally:
         peer.close()
 
