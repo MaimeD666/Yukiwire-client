@@ -1,6 +1,6 @@
 # Проверки и защита от регрессий
 
-Актуализировано: 2026-10-16 по существующим тестам и CI. Команды ниже — инструкция для будущих изменений; актуальные выполненные проверки записаны в state.md.
+Актуализировано: 2026-10-30 по существующим тестам и CI. Команды ниже — инструкция для будущих изменений; актуальные выполненные проверки записаны в state.md.
 
 ## Выбор уровня
 
@@ -59,7 +59,7 @@ python -B -m unittest discover -s tests -v
 
 ```powershell
 python scripts/build_portable.py
-python scripts/verify_portable.py dist/Yukiwire-0.5-win-x64.zip --native
+python scripts/verify_portable.py dist/Yukiwire-0.6-win-x64.zip --native
 python scripts/build_installer.py
 python scripts/verify_installer.py
 ```
@@ -99,6 +99,8 @@ python scripts/verify_installer.py
 
 ## Новые обязательные сценарии
 
+- `test_health.py`, `test_service.py`: сброс соединения/ошибка сертификата первой цели не отвергают транспорт при проверенном HTTPS другой цели через тот же диагностический endpoint. Все цели недоступны — ошибка без секретного текста исключений; нет direct fallback, отмена запрещает следующую попытку и поздний успех. Применение системного/совместного прокси остаётся после проверки готовности; матрица TUN не подменяется проверкой транспорта. Живой loopback-прокси с реальным профилем подтверждает только этот путь, не TUN/видео.
+
 - `test_broker_pipe.py`: настоящий named pipe без UAC, одновременное ожидание чтения/запись большого кадра, отмена ожидания клиента/чтения, ограничение кадра и проверка PID. Это обязательная регрессия блокировки синхронного duplex. `network-acceptance.yml` запускает production helper и `verify_network_live.py` на одноразовой Windows VM; последний скрипт явно отказывается работать вне elevated GitHub-hosted runner.
 
 - `test_dns.py`: настоящий Xray и два локальных UDP DNS-сервера; direct/proxy/block/пересечения/fallback. Живые DNS IPv6/TUN проверять отдельно.
@@ -118,3 +120,9 @@ python scripts/verify_installer.py
 `test_network_cleanup.py` проверяет точные x64 IP Helper layouts и отказ чужого адаптера без изменений сети. Реальная очистка проверяется только в сетевой приёмке. Для IPC дополнительно обязателен test_broker_pipe с настоящим Windows pipe.
 
 В Release после Checks выполняется `verify_network_package.py <ZIP>`: проверка манифеста, извлечение в отдельную папку и production helper/live-сценарии именно с bundled Python и компонентом из публикуемого ZIP. Test-only аварийный процесс снимает только WFP-ключи данного компонента/учётной записи; он не входит в пакет. Публикация зависит от успеха этой проверки, затем проверяются размеры/digests всех загруженных assets.
+
+## Hysteria 2 (0.6)
+
+`python -B -m unittest discover -s tests -p test_hysteria_integration.py -v` запускает два настоящих Xray на loopback и синтетические HTTP/UDP endpoints. Сертификат/ключ создаются в памяти через xray tls cert; пользовательские профили, доверенные CA, TUN и системный proxy не меняются. Проверяются TCP с/без Salamander, UDP, UDPHop wrapper, отказ неверных pin/auth без direct fallback. Для детерминированного теста hopping используется повтор одного порта: это не проверка переключения между различными внешними портами спустя 30 секунд. При отсутствии ядра — явный SKIP.
+
+Обязательны также test_config, test_subscriptions и test_network_policy: URI/IPv6/диапазоны/ошибки/сертификат, plain/base64 импорт и точная привилегированная конфигурация pure TUN/combined. Защищённый helper отвергает другие IP, режимы/интервалы hopping и чрезмерные диапазоны. В CI verify_network_live повторяет system/pure TUN/combined и WFP на Hysteria2+Salamander+pin+UDPHop, проверяет HTTPS/counters и UDP DNS в TUN. verify_network_package выполняет ту же матрицу на финальном ZIP с bundled Python; лимит расширен до 600 секунд для двух протоколов. Не запускать эту сетевую приёмку на рабочем ПК.

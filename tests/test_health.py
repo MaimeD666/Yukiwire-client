@@ -1,11 +1,52 @@
 import unittest
 import ssl
+import threading
 from unittest.mock import patch
 
-from yukiwire.health import probe_https, check_sites, trace_country, diagnostic_config
+from yukiwire.health import probe_https, probe_transport, check_sites, trace_country, diagnostic_config
 
 
 class HealthTests(unittest.TestCase):
+    def test_transport_falls_back_on_same_authenticated_path_with_tls_verification(self):
+        result = {'http_status': 403, 'tls_verified': True, 'target': 'www.cloudflare.com'}
+        for failure in (ConnectionResetError('private endpoint'), ssl.SSLCertVerificationError('private endpoint')):
+            with self.subTest(error=type(failure).__name__), \
+                 patch('yukiwire.health.probe_https', side_effect=[failure, result]) as probe:
+                self.assertEqual(probe_transport(port=23456, headers={'Proxy-Authorization': 'test'}), result)
+                self.assertEqual([c.kwargs['host'] for c in probe.call_args_list], ['example.com', 'www.cloudflare.com'])
+                for call in probe.call_args_list:
+                    self.assertEqual(call.kwargs['port'], 23456)
+                    self.assertEqual(call.kwargs['headers'], {'Proxy-Authorization': 'test'})
+                    self.assertEqual(call.kwargs['timeout'], 5)
+
+    def test_transport_all_failed_is_an_error_without_private_exception_text(self):
+        with patch('yukiwire.health.probe_https', side_effect=ConnectionResetError('secret.example token')) as probe:
+            with self.assertRaises(ValueError) as caught:
+                probe_transport(port=23456)
+        self.assertEqual(probe.call_count, 3)
+        self.assertIn('ConnectionResetError', str(caught.exception))
+        self.assertNotIn('secret.example', str(caught.exception))
+        self.assertNotIn('token', str(caught.exception))
+
+    def test_transport_cancellation_prevents_next_attempt_and_late_success(self):
+        for succeeds in (False, True):
+            cancel = threading.Event()
+            def attempt(**kwargs):
+                cancel.set()
+                if not succeeds:
+                    raise ConnectionResetError()
+                return {'http_status': 200, 'tls_verified': True}
+            with self.subTest(succeeds=succeeds), patch('yukiwire.health.probe_https', side_effect=attempt) as probe:
+                with self.assertRaisesRegex(ValueError, 'отменено'):
+                    probe_transport(port=23456, cancel=cancel)
+                self.assertEqual(probe.call_count, 1)
+
+    def test_transport_never_falls_back_to_direct_network(self):
+        with patch('yukiwire.health.probe_https') as probe:
+            with self.assertRaises(ValueError):
+                probe_transport(port=None)
+            probe.assert_not_called()
+
     def test_tun_probe_uses_os_route_without_an_explicit_proxy(self):
         with patch('yukiwire.health.http.client.HTTPSConnection') as factory:
             factory.return_value.getresponse.return_value.status = 200

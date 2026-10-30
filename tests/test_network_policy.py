@@ -96,6 +96,21 @@ class NetworkPolicyTests(unittest.TestCase):
             else: config['inbounds'].append({'tag': 'evil', 'protocol': 'dokodemo-door'})
             with self.subTest(alteration=alteration): self.assertNotEqual(self.validate(config)[0], 0)
 
+    def test_hysteria_hopping_is_preserved_and_cannot_redirect_to_other_ips(self):
+        for combined in (False, True):
+            config = self.configuration(combined)
+            _, profile = build_config('hy2://fixture@192.0.2.1:443,5000-6000/?obfs=salamander&obfs-password=fixture&pinSHA256=' + 'AB' * 32)
+            config['outbounds'][0] = profile['outbounds'][0]
+            code, result = self.validate(config)
+            self.assertEqual(code, 0)
+            self.assertEqual(result['outbounds'], config['outbounds'])
+            for change in ({'remoteIPs': ['192.0.2.2']}, {'mode': 'intervalLocal'}, {'interval': 0},
+                           {'remotePorts': '0'}, {'remotePorts': '65536'}, {'remotePorts': '3-1'},
+                           {'remotePorts': '443,secret'}, {'remotePorts': '1-65535,1-65535'}):
+                candidate = copy.deepcopy(config)
+                candidate['outbounds'][0]['streamSettings']['finalmask']['udp'][1]['settings'].update(change)
+                self.assertNotEqual(self.validate(candidate)[0], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

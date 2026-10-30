@@ -8,6 +8,31 @@ from .version import VERSION, USER_AGENT
 from .endpoints import Endpoint, HTTP_PORT, PROBE_PORT
 
 SITES = ('example.com', 'github.com', 'www.youtube.com', 'chatgpt.com', 'auth.openai.com')
+TRANSPORT_SITES = ('example.com', 'www.cloudflare.com', 'github.com')
+
+
+def probe_transport(port=PROBE_PORT, headers=None, cancel=None):
+    """Verify one VPN path without making one destination a readiness dependency."""
+    if port is None:
+        raise ValueError('Для проверки VPN нужен диагностический прокси.')
+    failures = []
+    for host in TRANSPORT_SITES:
+        if cancel is not None and cancel.is_set():
+            raise ValueError('Подключение отменено.')
+        try:
+            result = probe_https(port=port, host=host, timeout=5, headers=headers)
+        except (OSError, http.client.HTTPException) as exc:
+            # Exception text may contain private endpoints; retain only fixed targets/types.
+            failures.append('%s: %s' % (host, type(exc).__name__))
+            continue
+        if cancel is not None and cancel.is_set():
+            raise ValueError('Подключение отменено.')
+        return result  # Even HTTP 403 proves verified TLS transport, not page access.
+    if cancel is not None and cancel.is_set():
+        raise ValueError('Подключение отменено.')
+    raise ValueError('Не удалось проверить HTTPS через VPN на нескольких сайтах (%s). '
+                     'Это не доказывает блокировку IP сервера. Проверьте профиль, транспорт и сетевые фильтры. '
+                     'Сохранённые настройки не изменены.' % '; '.join(failures)) from None
 
 
 def diagnostic_config(config, endpoint=None):

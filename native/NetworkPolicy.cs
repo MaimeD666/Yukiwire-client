@@ -30,7 +30,7 @@ namespace Yukiwire {
    statsInboundUplink statsInboundDownlink statsOutboundUplink statsOutboundDownlink statsUserUplink statsUserDownlink
    handshake connIdle uplinkOnly downlinkOnly bufferSize
    enabled destOverride domainsExcluded metadataOnly routeOnly
-   version hysteriaSettings udpIdleTimeout finalmask settings pinnedPeerCertSha256 echConfigList
+   version hysteriaSettings udpIdleTimeout finalmask settings pinnedPeerCertSha256 echConfigList remotePorts
    kcpSettings mtu tti uplinkCapacity downlinkCapacity cwndMultiplier maxSendingWindow
    noKernelTun secretKey peers preSharedKey endpoint keepAlive allowedIPs reserved remoteDNS");
   static HashSet<string> Set(string words) { return new HashSet<string>(words.Split((char[])null,StringSplitOptions.RemoveEmptyEntries),StringComparer.Ordinal); }
@@ -59,8 +59,23 @@ namespace Yukiwire {
       var mask = Map(pair.Value); Keys(mask,"udp");
       foreach (object item in Items(mask["udp"])) {
        var entry = Map(item); Keys(entry,"type settings");
-       if (Text(entry,"type") != "salamander") throw new InvalidOperationException("Unsupported UDP mask");
-       Keys(Map(entry["settings"]),"password");
+       var options = Map(entry["settings"]);
+       if (Text(entry,"type") == "salamander") Keys(options,"password");
+       else if (Text(entry,"type") == "udphop") {
+        // Client-side port hopping only: no alternative IPs or server listeners.
+        Keys(options,"mode interval remotePorts");
+        if (Text(options,"mode") != "intervalRemote" || !options.ContainsKey("interval") || !Object.Equals(options["interval"],30)) throw new InvalidOperationException("Invalid UDP hopping mode");
+        string ranges = Text(options,"remotePorts");
+        if (ranges.Length == 0 || ranges.Length > 2048) throw new InvalidOperationException("Invalid UDP ports");
+        int portCount = 0;
+        foreach (string range in ranges.Split(',')) {
+         if (!Regex.IsMatch(range,@"^[0-9]{1,5}(-[0-9]{1,5})?$")) throw new InvalidOperationException("Invalid UDP ports");
+         string[] ends = range.Split('-'); int first = Int32.Parse(ends[0]), last = Int32.Parse(ends[ends.Length-1]);
+         if (first < 1 || last > 65535 || first > last) throw new InvalidOperationException("Invalid UDP ports");
+         portCount += last-first+1;
+         if (portCount > 65535) throw new InvalidOperationException("Too many UDP ports");
+        }
+       } else throw new InvalidOperationException("Unsupported UDP mask");
       }
      }
      if (pair.Key == "headers" || pair.Key == "hosts") {

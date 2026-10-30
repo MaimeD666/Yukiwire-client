@@ -11,6 +11,15 @@ LINK = 'vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls#
 
 
 class SubscriptionTests(unittest.TestCase):
+    def test_hysteria2_links_in_plain_and_base64_subscriptions(self):
+        links = 'HY2://fixture@192.0.2.1:443,5000-6000/#Hopping\nhysteria2://fixture@192.0.2.2/#Second'
+        for text in (links, base64.b64encode(links.encode()).decode()):
+            validate = Mock()
+            entries = subscriptions.profiles(text, validate)
+            self.assertEqual([e['protocol'] for e in entries], ['hysteria', 'hysteria'])
+            self.assertEqual([e['name'] for e in entries], ['Hopping', 'Second'])
+            self.assertEqual(validate.call_count, 2)
+
     def test_plain_and_base64_lists_validate_every_profile_and_deduplicate(self):
         for text in (LINK + '\n' + LINK, base64.b64encode((LINK + '\n' + LINK).encode()).decode()):
             validate = Mock()

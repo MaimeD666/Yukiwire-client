@@ -124,7 +124,7 @@ class ServiceTests(unittest.TestCase):
         session.endpoints = allocate_endpoints()
         session.core = Mock()
         session.core.process.poll.return_value = None
-        with patch('yukiwire.session.probe_https') as probe:
+        with patch('yukiwire.session.probe_transport') as probe:
             session.probe()
         probe.assert_called_once_with(port=session.endpoints['probe'].port, headers=session.endpoints['probe'].headers)
 
@@ -148,7 +148,7 @@ class ServiceTests(unittest.TestCase):
                      patch('yukiwire.session.validate_config'), \
                      patch('yukiwire.session.socket.socket') as socket, \
                      patch('yukiwire.session.CoreProcess', return_value=core), \
-                     patch('yukiwire.session.probe_https', side_effect=checked) as probe:
+                     patch('yukiwire.session.probe_transport', side_effect=checked) as probe:
                     rules.return_value.tags.return_value = {}
                     socket.return_value.__enter__.return_value.connect_ex.return_value = 0
                     profile = 'vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?security=tls'
@@ -160,7 +160,7 @@ class ServiceTests(unittest.TestCase):
                         else:
                             session.start(profile, dict(DEFAULTS, capture='system', preset='all'), cancel)
                             session.guard.apply_proxy.assert_called_once()
-                        probe.assert_called_once_with(port=session.endpoints['probe'].port, headers=session.endpoints['probe'].headers)
+                        probe.assert_called_once_with(port=session.endpoints['probe'].port, headers=session.endpoints['probe'].headers, cancel=cancel)
                     finally:
                         session.stop()
 
@@ -190,7 +190,7 @@ class ServiceTests(unittest.TestCase):
              patch('yukiwire.session.validate_config'), \
              patch('yukiwire.session.socket.socket') as socket, \
              patch('yukiwire.session.ElevatedCore', side_effect=start_core), \
-             patch('yukiwire.session.probe_https', side_effect=verified) as probe:
+             patch('yukiwire.session.probe_transport', side_effect=verified) as probe:
             core_path.parent.__truediv__.return_value.is_file.return_value = True
             rules.return_value.tags.return_value = {}
             socket.return_value.__enter__.return_value.connect_ex.return_value = 0
@@ -200,7 +200,7 @@ class ServiceTests(unittest.TestCase):
                 session.guard.arm.assert_called_once()
                 self.assertEqual(session.guard.arm.call_args.args[:2], ('tun', 321))
                 ready.assert_called_once()
-                probe.assert_called_once_with(port=session.endpoints['probe'].port, headers=session.endpoints['probe'].headers)
+                probe.assert_called_once_with(port=session.endpoints['probe'].port, headers=session.endpoints['probe'].headers, cancel=None)
                 session.guard.apply_proxy.assert_called_once()
             finally:
                 session.stop()

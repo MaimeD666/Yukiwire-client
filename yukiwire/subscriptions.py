@@ -60,7 +60,7 @@ def profiles(text, validate):
     if not isinstance(text, str) or len(text) > LIMIT:
         raise ValueError('Некорректная подписка.')
     text = text.strip()
-    if not text.startswith(SCHEMES):
+    if not text.lower().startswith(SCHEMES):
         try:
             compact = ''.join(text.split())
             text = base64.b64decode(compact + '=' * (-len(compact) % 4), altchars=b'-_', validate=True).decode('utf-8-sig')
@@ -71,7 +71,7 @@ def profiles(text, validate):
         raise ValueError('В подписке должно быть от 1 до 100 профилей.')
     result = []
     for line in lines:
-        if not line.startswith(SCHEMES):
+        if not line.lower().startswith(SCHEMES):
             raise ValueError('Подписка содержит неподдерживаемый тип профиля. Прежняя версия сохранена.')
         name, config = build_config(line)
         validate(config)

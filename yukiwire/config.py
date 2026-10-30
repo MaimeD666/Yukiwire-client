@@ -106,14 +106,46 @@ def decode_base64(value):
 
 
 def other_link(text, socks_port, http_port):
-    if text.startswith(('hy2://', 'hysteria2://')):
-        uri = urlsplit(text)
-        if not uri.hostname:
-            raise ValueError('В Hysteria2 нужен адрес сервера.')
+    if text.lower().startswith(('hy2://', 'hysteria2://')):
+        try:
+            uri = urlsplit(text)
+            address = uri.hostname
+            authority = uri.netloc.rsplit('@', 1)[-1]
+            # urlsplit.port accepts only a single integer; Hysteria permits ranges.
+            if authority.startswith('['):
+                suffix = authority.split(']', 1)[1]
+                if suffix and not suffix.startswith(':'):
+                    raise ValueError()
+                ports = suffix[1:] if suffix else '443'
+            else:
+                if authority.count(':') > 1:
+                    raise ValueError()
+                ports = authority.split(':', 1)[1] if ':' in authority else '443'
+            if not address or uri.path not in ('', '/') or len(ports) > 2048:
+                raise ValueError()
+            ranges = []
+            port_count = 0
+            for item in ports.split(','):
+                if not re.fullmatch(r'[0-9]{1,5}(?:-[0-9]{1,5})?', item):
+                    raise ValueError()
+                first, _, last = item.partition('-')
+                start, end = int(first), int(last or first)
+                if not 1 <= start <= end <= 65535:
+                    raise ValueError()
+                port_count += end - start + 1
+                if port_count > 65535:
+                    raise ValueError()
+                ranges.append(str(start) if start == end else '%s-%s' % (start, end))
+            port = int(ranges[0].split('-')[0])
+        except ValueError:
+            raise ValueError('Hysteria2: неверный адрес или порт. Допустимы порт, список и диапазоны 1–65535; IPv6 укажите в скобках.') from None
         query = link_query(uri)
-        if query.get('insecure', '0').lower() not in ('', '0', 'false'):
+        insecure = query.get('insecure', '0').lower()
+        if insecure not in ('', '0', 'false', '1', 'true'):
+            raise ValueError('Hysteria2: insecure должен быть 0 или 1.')
+        if insecure in ('1', 'true') and not query.get('pinSHA256'):
             raise ValueError('Hysteria2: отключение проверки TLS запрещено. Исправьте сертификат или укажите его SHA256.')
-        tls = {'serverName': query.get('sni') or uri.hostname, 'allowInsecure': False}
+        tls = {'serverName': query.get('sni') or address, 'allowInsecure': False}
         if query.get('alpn'):
             tls['alpn'] = query['alpn'].split(',')
         if query.get('pinSHA256'):
@@ -125,12 +157,19 @@ def other_link(text, socks_port, http_port):
             tls['echConfigList'] = query['ech']
         stream = {'network': 'hysteria', 'security': 'tls', 'tlsSettings': tls,
                   'hysteriaSettings': {'version': 2, 'auth': unquote(uri.netloc.rsplit('@', 1)[0]) if '@' in uri.netloc else ''}}
+        masks = []
         obfs = query.get('obfs', '')
         if obfs:
             if obfs != 'salamander' or not query.get('obfs-password'):
                 raise ValueError('Поддерживается obfs=salamander с непустым obfs-password.')
-            stream['finalmask'] = {'udp': [{'type': 'salamander', 'settings': {'password': query['obfs-password']}}]}
-        outbound = {'tag': 'proxy', 'protocol': 'hysteria', 'settings': {'version': 2, 'address': uri.hostname, 'port': uri.port or 443},
+            masks.append({'type': 'salamander', 'settings': {'password': query['obfs-password']}})
+        elif query.get('obfs-password'):
+            raise ValueError('Hysteria2: для obfs-password укажите obfs=salamander.')
+        if len(ranges) > 1 or '-' in ranges[0]:
+            masks.append({'type': 'udphop', 'settings': {'mode': 'intervalRemote', 'interval': 30, 'remotePorts': ','.join(ranges)}})
+        if masks:
+            stream['finalmask'] = {'udp': masks}
+        outbound = {'tag': 'proxy', 'protocol': 'hysteria', 'settings': {'version': 2, 'address': address, 'port': port},
                     'streamSettings': stream}
         return finish_link(unquote(uri.fragment) or 'Hysteria2', outbound, socks_port, http_port)
     if text.startswith('vmess://'):
@@ -194,6 +233,10 @@ def build_config(text, socks_port=11808, http_port=11809):
     if not isinstance(text, str) or len(text) > 4 * 1024 * 1024:
         raise ValueError('Профиль должен быть текстом размером не более 4 МиБ.')
     text = text.strip()
+    if text.lower().startswith(('vpn://', 'awg://', 'amnezia://')) or re.search(r'(?im)^\s*\[Interface\]\s*$', text):
+        raise ValueError('AmneziaWG и контейнеры vpn:// пока не поддерживаются. Из Amnezia можно импортировать ссылку VLESS; конфигурация AmneziaWG требует отдельного движка.')
+    if text.lower().startswith(('hy2://', 'hysteria2://')):
+        return other_link(text, socks_port, http_port)
     if text.startswith('{'):
         original = json.loads(text)
         if not isinstance(original, dict) or not isinstance(original.get('outbounds'), list) or not original['outbounds']:

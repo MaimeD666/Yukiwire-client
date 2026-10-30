@@ -109,6 +109,42 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'H2'):
             build_config('trojan://fixture@192.0.2.1:443?type=h2')
 
+    def test_hysteria2_defaults_pinning_and_port_hopping(self):
+        for scheme in ('hy2', 'hysteria2', 'HY2'):
+            _, config = build_config(scheme + '://user:pa%40ss@server.example/?insecure=1&pinSHA256=' + ':'.join(['AB'] * 32))
+            outbound = config['outbounds'][0]
+            self.assertEqual(outbound['settings']['port'], 443)
+            self.assertEqual(outbound['streamSettings']['hysteriaSettings']['auth'], 'user:pa@ss')
+            tls = outbound['streamSettings']['tlsSettings']
+            self.assertFalse(tls['allowInsecure'])
+            self.assertEqual(tls['pinnedPeerCertSha256'], 'AB' * 32)
+        _, config = build_config('hy2://fixture@[2001:db8::1]:443,5000-6000/?obfs=salamander&obfs-password=fixture')
+        outbound = config['outbounds'][0]
+        self.assertEqual(outbound['settings']['address'], '2001:db8::1')
+        self.assertEqual(outbound['settings']['port'], 443)
+        masks = outbound['streamSettings']['finalmask']['udp']
+        self.assertEqual([item['type'] for item in masks], ['salamander', 'udphop'])
+        self.assertEqual(masks[1]['settings'], {'mode': 'intervalRemote', 'interval': 30, 'remotePorts': '443,5000-6000'})
+
+    def test_hysteria2_rejects_invalid_links_without_echoing_credentials(self):
+        for address in ('server.example:0', 'server.example:65536', 'server.example:',
+                        'server.example:private-token', 'server.example:443,', 'server.example:5-4',
+                        'server.example:-1', 'server.example:1-65536', 'server.example:1-65535,1-65535', '[2001:db8::1]extra:443',
+                        '2001:db8::1', 'server.example/path'):
+            with self.subTest(address=address), self.assertRaises(ValueError) as error:
+                build_config('hy2://private-credential@' + address)
+            self.assertNotIn('private-', str(error.exception))
+        for query in ('insecure=maybe', 'insecure=1&pinSHA256=bad', 'obfs-password=private-token',
+                      'sni=a&sni=b', 'obfs=gecko', 'insecure=1&insecure=0'):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                build_config('hy2://fixture@server.example?' + query)
+
+    def test_amnezia_requires_a_supported_export_without_echoing_key(self):
+        for text in ('vpn://private-token', 'awg://private-token', '[Interface]\nPrivateKey = private-token'):
+            with self.assertRaisesRegex(ValueError, 'AmneziaWG') as error:
+                build_config(text)
+            self.assertNotIn('private-token', str(error.exception))
+
     def test_system_interface_outbound_is_rejected(self):
         with self.assertRaises(ValueError):
             build_config('{"outbounds": [{"protocol": "wireguard", "settings": {"kernelMode": true}}]}')

@@ -25,7 +25,7 @@ def verify(archive):
     environment = dict(os.environ, YUKIWIRE_ACCEPTANCE_BUNDLE=str(target))
     python = target / 'python/python.exe'
     for script, arguments, timeout in [('verify_network_component.py', ['--install'], 150),
-                                       ('verify_network_live.py', [], 330)]:
+                                       ('verify_network_live.py', [], 600)]:
         subprocess.run([str(python), '-u', str(ROOT / 'scripts' / script), *arguments],
                        env=environment, check=True, timeout=timeout)
     print('Exact release ZIP passed protected-helper and live network acceptance.')

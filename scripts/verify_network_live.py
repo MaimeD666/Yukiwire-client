@@ -1,8 +1,9 @@
 """Real network changes, ONLY on a disposable GitHub-hosted Windows VM.
 
-Uses a public synthetic VLESS peer. Never loads a saved user profile.
+Uses synthetic VLESS and Hysteria2 peers. Never loads a saved user profile.
 """
 import ctypes
+from contextlib import ExitStack
 from ctypes import wintypes
 import http.client
 import json
@@ -15,6 +16,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'tests'))
 if os.environ.get('YUKIWIRE_ACCEPTANCE_BUNDLE'):
     sys.path.insert(0, os.environ['YUKIWIRE_ACCEPTANCE_BUNDLE'])
 
@@ -156,16 +158,29 @@ def verify():
                        'streamSettings': {'sockopt': {'interface': physical}}}]})
     wait_for(lambda: port_ready(port), 'Synthetic peer did not listen')
     profile = 'vless://00000000-0000-4000-8000-000000000001@127.0.0.1:%d?security=none' % port
+    peers = ExitStack()
+    peers.callback(peer.close)
     try:
-        for capture, combined, protection in [('system', False, False), ('tun', False, False),
-                                               ('tun', True, False), ('system', False, True), ('tun', True, True)]:
-            print('Real capture: %s, combined=%s, protection=%s' % (capture, combined, protection), flush=True)
+        from hysteria_fixture import hysteria_peer
+        hy2 = peers.enter_context(hysteria_peer(executable, True, outbound={
+            'protocol': 'freedom', 'settings': {'domainStrategy': 'UseIPv4'},
+            'streamSettings': {'sockopt': {'interface': physical}}}))
+        # Exercise the UDP-hop wrapper in the protected helper as well as Salamander/pinning.
+        hy2_port = hy2.split('127.0.0.1:', 1)[1].split('/', 1)[0]
+        hy2 = hy2.replace(':%s/' % hy2_port, ':%s,%s/' % (hy2_port, hy2_port))
+        modes = [('system', False, False), ('tun', False, False), ('tun', True, False),
+                 ('system', False, True), ('tun', True, True)]
+        cases = [(link, capture, combined, protection) for link in (profile, hy2)
+                 for capture, combined, protection in modes]
+        for selected_profile, capture, combined, protection in cases:
+            print('Real capture: %s, %s, combined=%s, protection=%s' %
+                  (selected_profile.split(':', 1)[0], capture, combined, protection), flush=True)
             assert direct_tcp(), 'Baseline internet must be reachable before protection'
             session = Session()
             existing_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
                 assert udp_dns(*udp_destinations[0], connection=existing_udp), 'Existing UDP baseline failed'
-                session.start(profile, dict(DEFAULTS, capture=capture, tun_system_proxy=combined,
+                session.start(selected_profile, dict(DEFAULTS, capture=capture, tun_system_proxy=combined,
                                             kill_switch=protection, preset='all', auto_reconnect=False))
                 print('Capture started.', flush=True)
                 if capture == 'tun':
@@ -173,6 +188,7 @@ def verify():
                     assert probe_https(port=None)['tls_verified']
                     wait_for(lambda: inbound_bytes(session, 'yukiwire-tun') > previous, 'HTTPS bypassed TUN')
                     print('TUN HTTPS and inbound counters passed.', flush=True)
+                    assert udp_dns(*udp_destinations[0]), 'UDP DNS through TUN failed'
                 if capture == 'system' or combined:
                     proxy = WinInetProxy().read()
                     assert proxy['flags'] & 2 and proxy['server'] == session.own_proxy()
@@ -259,7 +275,7 @@ def verify():
             session.broker.close()
         print('Production TUN/system/combined, WFP TCP/UDP/DNS, core/helper crash and EOF recovery passed.', flush=True)
     finally:
-        peer.close()
+        peers.close()
 
 
 if __name__ == '__main__':

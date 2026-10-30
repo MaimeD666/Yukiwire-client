@@ -1,10 +1,12 @@
 # Обзор Yukiwire
 
-Актуализировано: 2026-10-16 по локальным исходникам. Начинай с этого файла и [state.md](state.md). Правила обновления — в [AGENTS.md](../../AGENTS.md).
+Актуализировано: 2026-10-30 по локальным исходникам. Начинай с этого файла и [state.md](state.md). Правила обновления — в [AGENTS.md](../../AGENTS.md).
 
 ## Продукт и платформа
 
-Yukiwire 0.5 — клиент Xray для Windows 10/11 x64. Репозиторий: `MaimeD666/Yukiwire-client`. Импорт VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и JSON Xray, включая userspace WireGuard; библиотека/HTTPS-подписки/QR, маршрутизация, игровые исключения, диагностика и статистика. Версия и результаты публикации фиксируются в state.md.
+Yukiwire 0.6 — клиент Xray для Windows 10/11 x64. Репозиторий: `MaimeD666/Yukiwire-client`. Импорт VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и JSON Xray, включая userspace WireGuard; библиотека/HTTPS-подписки/QR, маршрутизация, игровые исключения, диагностика и статистика. Версия и результаты публикации фиксируются в state.md.
+
+Hysteria 2 использует штатный Xray: hy2/hysteria2, Salamander, pinSHA256, списки и диапазоны портов (UDPHop каждые 30 секунд). AmneziaWG и vpn:// не импортируются; обычные VLESS-ссылки из Amnezia совместимы. Контракт — D-012.
 
 Режимы захвата: локальный прокси (`local`), системный прокси (`system`), TUN (`tun`). В TUN отдельно включается системный прокси (`tun_system_proxy`) для приложений, учитывающих настройки Windows. Чистый TUN и TUN с прокси — самостоятельные сценарии проверок.
 
@@ -73,7 +75,7 @@ python scripts/download_wintun.py
 python -m yukiwire
 ```
 
-Для сборки: `python scripts/build_native.py`, затем `python scripts/build_portable.py` и `python scripts/build_installer.py`. Portable по умолчанию требует Wintun; вспомогательные скрипты загружают WebView2 SDK и embedded Python. Имена актуальных артефактов — `dist/Yukiwire-0.5-win-x64.zip` и `dist/Yukiwire-0.5-win-x64-setup.exe`.
+Для сборки: `python scripts/build_native.py`, затем `python scripts/build_portable.py` и `python scripts/build_installer.py`. Portable по умолчанию требует Wintun; вспомогательные скрипты загружают WebView2 SDK и embedded Python. Имена актуальных артефактов — `dist/Yukiwire-0.6-win-x64.zip` и `dist/Yukiwire-0.6-win-x64-setup.exe`.
 
 `build_portable` включает неизменённый RU snapshot `88549b306b2b19c6e19ddd09fe9f27f4fb92df10` из `download_rules.py`, с независимыми SHA256 и лицензией; исходные runtime/core geodata при сборке не перезаписываются. Setup включает подписанный полный WebView2 x64 (offline), .NET 4.8 остаётся предварительным требованием. Чистая машина без Runtime ещё не проверена.
 

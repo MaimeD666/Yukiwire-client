@@ -7,7 +7,7 @@ import time
 
 from .config import build_config
 from .geodata import RuleSets
-from .health import probe_https, diagnostic_config
+from .health import probe_transport, diagnostic_config
 from .network import NetworkGuard, add_tun, conflicts, new_tun, tun_preflight, tun_ready
 from .paths import CORE
 from .process import CoreProcess
@@ -136,7 +136,7 @@ class Session:
                                 self.core.permit_tun()
                             if self.settings['capture'] != 'local':
                                 # Never hand Windows an unverified local proxy endpoint.
-                                probe_https(port=self.endpoints['probe'].port, headers=self.endpoints['probe'].headers)
+                                probe_transport(port=self.endpoints['probe'].port, headers=self.endpoints['probe'].headers, cancel=cancel)
                             if cancel and cancel.is_set():
                                 raise ValueError('Подключение отменено.')
                             if self.settings['capture'] != 'local':
@@ -184,7 +184,7 @@ class Session:
         if not self.core or self.core.process.poll() is not None:
             raise ValueError('Ядро не запущено.')
         endpoint = self.endpoints['probe']
-        return probe_https(port=endpoint.port, headers=endpoint.headers)
+        return probe_transport(port=endpoint.port, headers=endpoint.headers)
 
     def public_endpoints(self):
         if not self.core or not self.endpoints or (self.settings['capture'] == 'tun' and not self.settings['tun_system_proxy']):
