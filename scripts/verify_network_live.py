@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -133,7 +134,9 @@ def verify():
     assert not any(STATE.glob('*.dpapi')), 'Runner must not contain user state'
     before_proxy, before_foreign = WinInetProxy().read(), foreign_snapshot()
     default = next(r for r in routes() if r['prefix'] == '0.0.0.0/0')
-    physical = next(a['name'] for a in adapters() if a['index'] == default['index'])
+    adapter = next(a for a in adapters() if a['index'] == default['index'])
+    physical = adapter['name']
+    physical_ip = next(address.split('/')[0] for address in adapter['addresses'] if ':' not in address)
     udp_destinations = [(socket.AF_INET, ('1.1.1.1', 53))]
     assert udp_dns(*udp_destinations[0]), 'Real UDP DNS baseline is unavailable'
     ipv6_dns = (socket.AF_INET6, ('2606:4700:4700::1111', 53))
@@ -162,11 +165,14 @@ def verify():
     peers.callback(peer.close)
     try:
         from hysteria_fixture import hysteria_peer
-        hy2 = peers.enter_context(hysteria_peer(executable, True, outbound={
+        # Windows cannot send UDP to loopback when TUN binds outbound sockets to
+        # the physical NIC (WSAEADDRNOTAVAIL). Use that NIC's own address on this
+        # disposable VM; the peer has fresh in-memory auth/obfuscation secrets.
+        hy2 = peers.enter_context(hysteria_peer(executable, True, host=physical_ip, outbound={
             'protocol': 'freedom', 'settings': {'domainStrategy': 'UseIPv4'},
             'streamSettings': {'sockopt': {'interface': physical}}}))
         # Exercise the UDP-hop wrapper in the protected helper as well as Salamander/pinning.
-        hy2_port = hy2.split('127.0.0.1:', 1)[1].split('/', 1)[0]
+        hy2_port = urlsplit(hy2).port
         hy2 = hy2.replace(':%s/' % hy2_port, ':%s,%s/' % (hy2_port, hy2_port))
         modes = [('system', False, False), ('tun', False, False), ('tun', True, False),
                  ('system', False, True), ('tun', True, True)]

@@ -1,7 +1,8 @@
-"""Synthetic loopback Hysteria peer. Keys are generated in memory, never persisted."""
+"""Synthetic Hysteria peer (loopback by default); keys live only in memory."""
 from contextlib import contextmanager
 import hashlib
 import json
+import secrets
 import socket
 import ssl
 import subprocess
@@ -11,26 +12,27 @@ from yukiwire.process import CoreProcess
 
 
 @contextmanager
-def hysteria_peer(executable, obfs=False, outbound=None):
+def hysteria_peer(executable, obfs=False, outbound=None, host='127.0.0.1'):
     result = subprocess.run([str(executable), 'tls', 'cert', '-json', '-domain=hy2.test'],
                             capture_output=True, check=True, timeout=10,
                             creationflags=subprocess.CREATE_NO_WINDOW)
     certificate = json.loads(result.stdout)
     pin = hashlib.sha256(ssl.PEM_cert_to_DER_cert('\n'.join(certificate['certificate']))).hexdigest()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp, socket.socket() as tcp:
-        udp.bind(('127.0.0.1', 0))
+        udp.bind((host, 0))
         tcp.bind(('127.0.0.1', 0))
         port, ready = udp.getsockname()[1], tcp.getsockname()[1]
+    password, obfs_password = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
     stream = {'network': 'hysteria', 'security': 'tls',
               'tlsSettings': {'alpn': ['h3'], 'certificates': [certificate]},
-              'hysteriaSettings': {'version': 2, 'auth': 'user:fixture'}}
+              'hysteriaSettings': {'version': 2, 'auth': 'user:' + password}}
     suffix = ''
     if obfs:
-        stream['finalmask'] = {'udp': [{'type': 'salamander', 'settings': {'password': 'fixture-obfs'}}]}
-        suffix = '&obfs=salamander&obfs-password=fixture-obfs'
+        stream['finalmask'] = {'udp': [{'type': 'salamander', 'settings': {'password': obfs_password}}]}
+        suffix = '&obfs=salamander&obfs-password=' + obfs_password
     config = {'log': {'loglevel': 'warning'},
               'dns': {'servers': ['1.1.1.1'], 'queryStrategy': 'UseIPv4'},
-              'inbounds': [{'listen': '127.0.0.1', 'port': port, 'protocol': 'hysteria',
+              'inbounds': [{'listen': host, 'port': port, 'protocol': 'hysteria',
                             'settings': {'version': 2}, 'streamSettings': stream},
                            {'listen': '127.0.0.1', 'port': ready, 'protocol': 'http', 'settings': {}}],
               # Xray servers deny private destinations by default; permit only our test loopback.
@@ -47,6 +49,6 @@ def hysteria_peer(executable, obfs=False, outbound=None):
                 if core.process.poll() is not None or time.monotonic() >= deadline:
                     raise AssertionError('Synthetic Hysteria peer failed to start')
                 time.sleep(.03)
-        yield f'hy2://user%3Afixture@127.0.0.1:{port}/?sni=hy2.test&insecure=1&pinSHA256={pin}{suffix}'
+        yield f'hy2://user%3A{password}@{host}:{port}/?sni=hy2.test&insecure=1&pinSHA256={pin}{suffix}'
     finally:
         core.close()

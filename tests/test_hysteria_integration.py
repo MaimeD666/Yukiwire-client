@@ -87,6 +87,6 @@ class HysteriaIntegrationTests(unittest.TestCase):
     def test_wrong_pin_and_password_fail_without_direct_fallback(self):
         with serving(ThreadingHTTPServer(('127.0.0.1', 0), Origin)) as origin, hysteria_peer(CORE) as profile:
             for link in (profile.split('&pinSHA256=')[0] + '&pinSHA256=' + '00' * 32,
-                         profile.replace('user%3Afixture', 'wrong-password')):
+                         'hy2://wrong-password@' + profile.split('@', 1)[1]):
                 with running_core(client_config(link)) as ports:
                     self.assertNotEqual(get_http(ports['local-http'], origin), b'hysteria-ok')
